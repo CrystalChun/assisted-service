@@ -157,6 +157,11 @@ function gather_hypershift_data() {
   hypershift_dir="${LOGS_DEST}/hypershift"
   mkdir -p "${hypershift_dir}"
 
+  oc get po -n hypershift -o yaml > ${hypershift_dir}/hypershift_pods.yaml
+  oc get po -n hypershift -o custom-columns=:.metadata.name | while read hypershift_pod_name ; do
+    oc logs -n hypershift $hypershift_pod_name > ${hypershift_dir}/hypershift_pod_log_$hypershift_pod_name.log
+  done
+
   oc get all -n "${SPOKE_NAMESPACE}" > ${hypershift_dir}/oc_get_all.log
   oc get configmap -n "${SPOKE_NAMESPACE}" assisted-service -o yaml > ${hypershift_dir}/oc_get_configmap.yaml
   oc get events -n "${SPOKE_NAMESPACE}" --sort-by=.metadata.creationTimestamp > ${hypershift_dir}/oc_get_events.log
@@ -178,12 +183,23 @@ function gather_hypershift_data() {
   mkdir -p "${spoke_dir}"
 
   SPOKE_KUBECONFIG=/tmp/spoke-cluster-kubeconfig
+  spoke_cluster_name=$(oc get hostedcluster -n "${SPOKE_NAMESPACE}" -o custom-columns=:.metadata.name --no-headers)
+  oc extract -n "${SPOKE_NAMESPACE}" secret/"${SPOKE_CLUSTER_NAME}"-admin-kubeconfig --to=- > "${SPOKE_KUBECONFIG}"
   if [ -f "$SPOKE_KUBECONFIG" ]; then
     CRS=(agents infraenvs clusterdeployments agentclusterinstalls clusterimagesets)
     for cr in "${CRS[@]}"; do
       oc --kubeconfig ${SPOKE_KUBECONFIG} get "${cr}" -n "${SPOKE_NAMESPACE}" -o yaml > "${spoke_dir}/oc_get_${cr}.yaml"
     done
   fi
+  oc --kubeconfig "${SPOKE_KUBECONFIG}" get nodes -o yaml > "${spoke_dir}/oc_get_nodes.yaml"
+  mkdir -p "${spoke_dir}"/pods
+  oc --kubeconfig "${SPOKE_KUBECONFIG}" get po -A > "${spoke_dir}"/pods/oc_get_pods.log
+  oc --kubeconfig "${SPOKE_KUBECONFIG}" get po -A -o custom-columns=:metadata.namespace,:metadata.name | while read po ; do
+    ns=${echo $po | awk '{print $1}'}
+    spoke_pod_name=${echo $po | awk '{print $2}'}
+    oc --kubeconfig "${SPOKE_KUBECONFIG}" get po -o yaml -n $ns $spoke_pod_name > "${spoke_dir}"/pods/pod_$spoke_pod_name.yaml
+    oc --kubeconfig "${SPOKE_KUBECONFIG}" logs -n $ns $spoke_pod_name > "${spoke_dir}"/pods/logs_$spoke_pod_name.log
+  done
 }
 
 function gather_all() {
