@@ -5,13 +5,12 @@
 //go:build !go1.18
 // +build !go1.18
 
-package http2
+package gcimporter
 
-import (
-	"crypto/tls"
-	"net"
-)
+import "go/types"
 
-func tlsUnderlyingConn(tc *tls.Conn) net.Conn {
+const iexportVersion = iexportVersionGo1_11
+
+func additionalPredeclared() []types.Type {
 	return nil
 }

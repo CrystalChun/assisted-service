@@ -5,13 +5,15 @@
 //go:build go1.18
 // +build go1.18
 
-package http2
+package typesinternal
 
 import (
-	"crypto/tls"
-	"net"
+	"go/types"
 )
 
-func tlsUnderlyingConn(tc *tls.Conn) net.Conn {
-	return tc.NetConn()
+func init() {
+	SetGoVersion = func(conf *types.Config, version string) bool {
+		conf.GoVersion = version
+		return true
+	}
 }
