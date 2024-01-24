@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"os"
 	"time"
 
 	"github.com/go-openapi/strfmt"
@@ -170,6 +171,11 @@ func prepareFiles(ctx context.Context, db *gorm.DB, cluster *common.Cluster, eve
 	if err := gz.Close(); err != nil {
 		return nil, errors.Wrap(err, "failed closing gzip file")
 	}
+	log.Infof("CRYSTAL writing to data.tgz file")
+	err = os.WriteFile("/data/data.tgz", buffer.Bytes(), 0777)
+	if err != nil {
+		log.WithError(err).Errorf("failed to event file to /data/events.json")
+	}
 	return buffer, nil
 }
 
@@ -183,13 +189,26 @@ func eventsFile(ctx context.Context, clusterID *strfmt.UUID, eventsHandler event
 	}
 
 	var events []*models.Event
+	var dbEvents []*common.Event
 	for _, dbEvent := range response.GetEvents() {
-		events = append(events, &dbEvent.Event)
-	}
 
+		events = append(events, &dbEvent.Event)
+		dbEvents = append(dbEvents, dbEvent)
+	}
+	dbEventsContents, _ := json.MarshalIndent(dbEvents, "", "")
+	log.Infof("CRYSTAL writing to dbevents.json file")
+	err = os.WriteFile("/data/dbevents.json", dbEventsContents, 0777)
+	if err != nil {
+		log.WithError(err).Errorf("failed to event file to /data/events.json")
+	}
 	contents, err := json.MarshalIndent(events, "", " ")
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal events")
+	}
+	log.Infof("CRYSTAL writing to events.json file")
+	err = os.WriteFile("/data/events.json", contents, 0777)
+	if err != nil {
+		log.WithError(err).Errorf("failed to event file to /data/events.json")
 	}
 	return addFile(tw, contents, fmt.Sprintf("%s/events.json", *clusterID))
 }
