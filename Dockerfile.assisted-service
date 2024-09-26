@@ -40,7 +40,6 @@ COPY . /assisted-service/
 
 RUN cd cmd && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service
 RUN cd ./cmd/operator && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service-operator
-RUN cd ./cmd/webadmission && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service-admission
 RUN cd ./cmd/agentbasedinstaller/client && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/agent-installer-client
 
 # Create final image
@@ -89,7 +88,6 @@ COPY --from=quay.io/openshift/origin-cli:4.12 /usr/bin/oc /usr/local/bin/
 
 COPY --from=builder /build/assisted-service /assisted-service
 COPY --from=builder /build/assisted-service-operator /assisted-service-operator
-COPY --from=builder /build/assisted-service-admission /assisted-service-admission
 COPY --from=builder /build/agent-installer-client /usr/local/bin/agent-installer-client
 RUN ln -s /usr/local/bin/agent-installer-client /agent-based-installer-register-cluster-and-infraenv
 ENV GODEBUG=madvdontneed=1
