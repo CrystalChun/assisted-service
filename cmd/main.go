@@ -611,7 +611,8 @@ func main() {
 				AgentContainerImage:        Options.BMConfig.AgentDockerImg,
 				HostFSMountDir:             hostFSMountDir,
 			}).SetupWithManager(ctrlMgr), "unable to create controller Agent")
-
+			failOnError((&v1beta1.Agent{}).SetupWebhookWithManager(ctrlMgr), "unable to create Agent webhook")
+			
 			failOnError((&controllers.BMACReconciler{
 				Client:                ctrlMgr.GetClient(),
 				APIReader:             ctrlMgr.GetAPIReader(),
