@@ -637,6 +637,7 @@ func main() {
 				Client: ctrlMgr.GetClient(),
 				Log:    log,
 			}).SetupWithManager(ctrlMgr), "unable to create controller AgentClassification")
+			failOnError((&v1beta1.AgentClassification{}).SetupWebhookWithManager(ctrlMgr), "unable to create AgentClassification webhook")
 
 			failOnError((&controllers.AgentLabelReconciler{
 				Client: ctrlMgr.GetClient(),
