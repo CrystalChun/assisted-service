@@ -17,9 +17,9 @@ patchesStrategicMerge:
 #- patches/webhook_in_images.yaml
 #- patches/webhook_in_clusters.yaml
 #- patches/webhook_in_hosts.yaml
-- path: patches/webhook_in_agents.yaml
-- path: patches/webhook_in_infraenvs.yaml
-- path: patches/webhook_in_agentclassifications.yaml
+- patches/webhook_in_agents.yaml
+- patches/webhook_in_infraenvs.yaml
+- patches/webhook_in_agentclassifications.yaml
 # +kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable webhook, uncomment all the sections with [CERTMANAGER] prefix.
