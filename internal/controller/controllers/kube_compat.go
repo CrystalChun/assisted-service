@@ -202,5 +202,5 @@ func newCertificate(serviceName string, asc ASC) (client.Object, controllerutil.
 }
 
 func newWebhookCert(ctx context.Context, log logrus.FieldLogger, asc ASC) (client.Object, controllerutil.MutateFn, error) {
-	return newCertificate(webhookServiceName, asc)
+	return newCertificate(serviceName, asc)
 }

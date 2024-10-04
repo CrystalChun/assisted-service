@@ -821,7 +821,7 @@ func createControllerManager() (manager.Manager, error) {
 		}
 		return ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 			Scheme:           schemes,
-			WebhookServer:    webhook.NewServer(webhook.Options{Port: 9443}),
+			WebhookServer:    webhook.NewServer(webhook.Options{Port: 9443, CertDir: "/webhook-certs"}),
 			LeaderElection:   true,
 			LeaderElectionID: "77190dcb.agent-install.openshift.io",
 			Cache: cache.Options{

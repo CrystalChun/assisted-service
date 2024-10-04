@@ -44,6 +44,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
+	admregv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -112,6 +113,7 @@ const (
 var (
 	servicePort          = intstr.Parse("8090")
 	serviceHTTPPort      = intstr.Parse("8091")
+	webhookPort          = intstr.Parse("9443")
 	databasePort         = intstr.Parse("5432")
 	imageHandlerPort     = intstr.Parse("8080")
 	imageHandlerHTTPPort = intstr.Parse("8081")
@@ -295,6 +297,12 @@ func (r *AgentServiceConfigReconciler) Reconcile(origCtx context.Context, req ct
 		}
 	}
 
+	for _, component := range r.getWebhookComponents() {
+		if result, err := reconcileComponent(ctx, log, asc, component); err != nil {
+			return result, err
+		}
+	}
+
 	// Ensure image-service StatefulSet is reconciled
 	if err := ensureImageServiceStatefulSet(ctx, log, asc); err != nil {
 		return ctrl.Result{Requeue: true}, err
@@ -392,6 +400,146 @@ func getComponents(spec *aiv1beta1.AgentServiceConfigSpec, isOpenshift bool) []c
 		component{"AssistedServiceDeployment", aiv1beta1.ReasonDeploymentFailure, newAssistedServiceDeployment})
 	return components
 
+}
+
+func (r *AgentServiceConfigReconciler) getWebhookComponents() []component {
+	return []component{
+		/* 		{"AgentClusterInstallValidatingWebHook", aiv1beta1.ReasonValidatingWebHookFailure, newACIWebHook},
+		   		{"AgentClusterInstallMutatingWebHook", aiv1beta1.ReasonMutatingWebHookFailure, newACIMutatWebHook},
+		   		{"InfraEnvValidatingWebHook", aiv1beta1.ReasonValidatingWebHookFailure, newInfraEnvWebHook}, */
+		{"AgentValidatingWebHook", aiv1beta1.ReasonValidatingWebHookFailure, newWebhook},
+	}
+}
+func newWebhook(ctx context.Context, log logrus.FieldLogger, asc ASC) (client.Object, controllerutil.MutateFn, error) {
+	fp := admregv1.Fail
+	se := admregv1.SideEffectClassNone
+	agentPath := "/validate-agent-install-openshift-io-v1beta1-agent"
+	agentClassificationPath := "/validate-agent-install-openshift-io-v1beta1-agentclassification"
+	infraEnvPath := "/validate-agent-install-openshift-io-v1beta1-infraenv"
+	webhooks := []admregv1.ValidatingWebhook{
+		{
+			Name:          "vagent.kb.io",
+			FailurePolicy: &fp,
+			SideEffects:   &se,
+			AdmissionReviewVersions: []string{
+				"v1",
+			},
+			ClientConfig: admregv1.WebhookClientConfig{
+				Service: &admregv1.ServiceReference{
+					Namespace: asc.namespace,
+					Name:      serviceName,
+					Path:      &agentPath,
+				},
+			},
+			Rules: []admregv1.RuleWithOperations{
+				{
+					Operations: []admregv1.OperationType{
+						admregv1.Update,
+					},
+					Rule: admregv1.Rule{
+						APIGroups: []string{
+							"agent-install.openshift.io",
+						},
+						APIVersions: []string{
+							"v1beta1",
+						},
+						Resources: []string{
+							"agents",
+						},
+					},
+				},
+			},
+		},
+		{
+			Name:          "vagentclassification.kb.io",
+			FailurePolicy: &fp,
+			SideEffects:   &se,
+			AdmissionReviewVersions: []string{
+				"v1",
+			},
+			ClientConfig: admregv1.WebhookClientConfig{
+				Service: &admregv1.ServiceReference{
+					Namespace: asc.namespace,
+					Name:      serviceName,
+					Path:      &agentClassificationPath,
+				},
+			},
+			Rules: []admregv1.RuleWithOperations{
+				{
+					Operations: []admregv1.OperationType{
+						admregv1.Update,
+					},
+					Rule: admregv1.Rule{
+						APIGroups: []string{
+							"agent-install.openshift.io",
+						},
+						APIVersions: []string{
+							"v1beta1",
+						},
+						Resources: []string{
+							"agentclassifications",
+						},
+					},
+				},
+			},
+		},
+		{
+			Name:          "vinfraenv.kb.io",
+			FailurePolicy: &fp,
+			SideEffects:   &se,
+			AdmissionReviewVersions: []string{
+				"v1",
+			},
+			ClientConfig: admregv1.WebhookClientConfig{
+				Service: &admregv1.ServiceReference{
+					Namespace: asc.namespace,
+					Name:      serviceName,
+					Path:      &infraEnvPath,
+				},
+			},
+			Rules: []admregv1.RuleWithOperations{
+				{
+					Operations: []admregv1.OperationType{
+						admregv1.Update,
+					},
+					Rule: admregv1.Rule{
+						APIGroups: []string{
+							"agent-install.openshift.io",
+						},
+						APIVersions: []string{
+							"v1beta1",
+						},
+						Resources: []string{
+							"infraenvs",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	agent := admregv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "assisted-service-validating-webhook-configuration",
+		},
+		Webhooks: webhooks,
+	}
+
+	if !asc.rec.IsOpenShift {
+		agent.ObjectMeta.Annotations = map[string]string{
+			"cert-manager.io/inject-ca-from": fmt.Sprintf("%s/%s", asc.namespace, serviceName),
+		}
+	} else {
+		agent.ObjectMeta.Annotations = map[string]string{
+			"service.beta.openshift.io/inject-cabundle": "true",
+		}
+	}
+
+	mutateFn := func() error {
+		agent.Webhooks = webhooks
+		return nil
+	}
+	return &agent, mutateFn, nil
 }
 
 func reconcileComponent(ctx context.Context, log *logrus.Entry, asc ASC, component component) (ctrl.Result, error) {
@@ -636,9 +784,9 @@ func newAgentService(ctx context.Context, log logrus.FieldLogger, asc ASC) (clie
 		if asc.rec.IsOpenShift {
 			setAnnotation(&svc.ObjectMeta, servingCertAnnotation, serviceName)
 		}
-		if len(svc.Spec.Ports) != 2 {
+		if len(svc.Spec.Ports) < 2 {
 			svc.Spec.Ports = []corev1.ServicePort{}
-			svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{}, corev1.ServicePort{})
+			svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{}, corev1.ServicePort{}, corev1.ServicePort{})
 		}
 		svc.Spec.Ports[0].Name = serviceName
 		svc.Spec.Ports[0].Port = int32(servicePort.IntValue())
@@ -648,6 +796,11 @@ func newAgentService(ctx context.Context, log logrus.FieldLogger, asc ASC) (clie
 		svc.Spec.Ports[1].Port = int32(serviceHTTPPort.IntValue())
 		svc.Spec.Ports[1].TargetPort = serviceHTTPPort
 		svc.Spec.Ports[1].Protocol = corev1.ProtocolTCP
+		svc.Spec.Ports[2].Name = "webhook-server"
+		svc.Spec.Ports[2].Port = 443
+		// port change?
+		svc.Spec.Ports[2].TargetPort = intstr.IntOrString{Type: intstr.Int, IntVal: 9443}
+		svc.Spec.Ports[2].Protocol = corev1.ProtocolTCP
 		svc.Spec.Selector = map[string]string{"app": serviceName}
 		svc.Spec.Type = corev1.ServiceTypeClusterIP
 		return nil
@@ -1853,6 +2006,16 @@ func newAssistedServiceDeployment(ctx context.Context, log logrus.FieldLogger, a
 			},
 		)
 		healthCheckScheme = corev1.URISchemeHTTP
+		// mount webhook certificates
+		volumes = append(volumes, corev1.Volume{
+			Name: "webhook-serving-certs",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: serviceName,
+				},
+			},
+		})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "webhook-serving-certs", MountPath: "/webhook-certs"})
 	}
 
 	serviceContainer := corev1.Container{
@@ -1866,6 +2029,11 @@ func newAssistedServiceDeployment(ctx context.Context, log logrus.FieldLogger, a
 			{
 				ContainerPort: int32(serviceHTTPPort.IntValue()),
 				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				ContainerPort: int32(webhookPort.IntValue()),
+				Protocol:      corev1.ProtocolTCP,
+				Name:          "webhook-server",
 			},
 		},
 		EnvFrom:      envFrom,
