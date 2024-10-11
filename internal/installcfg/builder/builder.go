@@ -165,7 +165,7 @@ func (i *installConfigBuilder) setImageDigestMirrorSet(cfg *installcfg.Installer
 	var imageDigestSourceList []installcfg.ImageDigestSource
 	i.log.Infof("setImageDigestMirrorSet %+v", configuration)
 
-	if configuration != nil {
+	if configuration != nil && configuration.MirrorRegistryConfigurationInfo != nil {
 		i.log.Infof("Found cluster mirror configuration, setting imageDigestSourceList with +v", configuration.MirrorRegistryConfigurationInfo.ImageDigestMirrors)
 		imageDigestSourceList = make([]installcfg.ImageDigestSource, len(configuration.MirrorRegistryConfigurationInfo.ImageDigestMirrors))
 		for k, _registry := range configuration.MirrorRegistryConfigurationInfo.ImageDigestMirrors {
