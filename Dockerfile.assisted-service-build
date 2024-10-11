@@ -1,7 +1,7 @@
-FROM registry.access.redhat.com/ubi9/go-toolset:1.21 AS golang
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-openshift-4.18 AS golang
 
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.0
-RUN go install gotest.tools/gotestsum@latest
+#RUN go install gotest.tools/gotestsum@latest
 
 FROM quay.io/centos/centos:stream9
 
@@ -12,7 +12,7 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV TOOLS=/tools/
 ENV PATH="$VIRTUAL_ENV/bin:$GOROOT/bin:$GOPATH/bin:$TOOLS:$PATH"
 
-COPY --from=golang $GOPATH $GOPATH
+COPY --from=golang /go $GOPATH
 COPY --from=golang $GOROOT $GOROOT
 
 RUN chmod 775 -R $GOPATH && chmod 775 -R $GOROOT
