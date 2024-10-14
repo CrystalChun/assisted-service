@@ -198,13 +198,13 @@ func (h *handler) GetDNSDomain(clusterName, baseDNSDomainName string) (*DNSDomai
 // The max total length of a domain name is 255 bytes, including the dots. An individual label can be
 // up to 63 bytes. A single char may occupy more than one byte in Internationalized Domain Names (IDNs).
 func (h *handler) ValidateDNSName(clusterName, baseDNSDomainName string) error {
-	appsDomainNameSuffix := fmt.Sprintf(appsDomainNameFormat, clusterName, baseDNSDomainName)
+	appsDomainNameSuffix := fmt.Sprintf("%s.%s", clusterName, baseDNSDomainName)
 	apiErrorCode, err := validations.ValidateDomainNameFormat(baseDNSDomainName)
 	if err != nil {
 		return common.NewApiError(apiErrorCode, err)
 	}
-	if len(appsDomainNameSuffix) > dnsDomainPrefixMaxLen {
-		return errors.Errorf("Combination of cluster name and base DNS domain too long")
+	if len(appsDomainNameSuffix) > dnsDomainLabelLen {
+		return errors.Errorf("Combination of cluster name and base DNS domain too long. Should be less than [63] characters, but got [%d], domain: %s", len(appsDomainNameSuffix), appsDomainNameSuffix)
 	}
 	for _, label := range strings.Split(appsDomainNameSuffix, ".") {
 		if len(label) > dnsDomainLabelLen {
