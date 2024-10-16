@@ -7060,14 +7060,14 @@ definitions:
             noValidation: true
       url:
         type: string
-        description: The installation image of the OpenShift cluster.
+        description: The URL of the installation image of the OpenShift cluster.
         x-go-custom-tag: gorm:"primarykey"
       version:
         type: string
-        description: OCP version from the release metadata.
+        description: OCP version from the release metadata. Found by doing xyz
       default:
         type: boolean
-        description: Indication that the version is the recommended one.
+        description: Will be used as the image for all created clusters/infraenvs if set to true.
       support_level:
         type: string
         enum: [beta, production, maintenance, end-of-life]
