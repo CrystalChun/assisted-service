@@ -20,6 +20,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	metal3_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-image-service/pkg/servers"
+	"github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/openshift/assisted-service/internal/bminventory"
 	"github.com/openshift/assisted-service/internal/cluster"
 	"github.com/openshift/assisted-service/internal/cluster/validations"
@@ -578,7 +579,7 @@ func main() {
 				PullSecretHandler:   controllers.NewPullSecretHandler(c, r, bm),
 				InsecureIPXEURLs:    generateInsecureIPXEURLs,
 			}).SetupWithManager(ctrlMgr), "unable to create controller InfraEnv")
-
+			failOnError((&v1beta1.InfraEnv{}).SetupWebhookWithManager(ctrlMgr), "unable to create InfraEnv webhook")
 			cluster_client := ctrlMgr.GetClient()
 			cluster_reader := ctrlMgr.GetAPIReader()
 			failOnError((&controllers.ClusterDeploymentsReconciler{
@@ -613,7 +614,7 @@ func main() {
 				AgentContainerImage:        Options.BMConfig.AgentDockerImg,
 				HostFSMountDir:             hostFSMountDir,
 			}).SetupWithManager(ctrlMgr), "unable to create controller Agent")
-
+			failOnError((&v1beta1.Agent{}).SetupWebhookWithManager(ctrlMgr), "unable to create Agent webhook")
 			failOnError((&controllers.BMACReconciler{
 				Client:                ctrlMgr.GetClient(),
 				APIReader:             ctrlMgr.GetAPIReader(),
@@ -636,7 +637,7 @@ func main() {
 				Client: ctrlMgr.GetClient(),
 				Log:    log,
 			}).SetupWithManager(ctrlMgr), "unable to create controller AgentClassification")
-
+			failOnError((&v1beta1.AgentClassification{}).SetupWebhookWithManager(ctrlMgr), "unable to create AgentClassification webhook")
 			failOnError((&controllers.AgentLabelReconciler{
 				Client: ctrlMgr.GetClient(),
 				Log:    log,
