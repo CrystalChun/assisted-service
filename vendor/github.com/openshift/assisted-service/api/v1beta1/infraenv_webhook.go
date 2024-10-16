@@ -36,8 +36,6 @@ func (r *InfraEnv) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-//+kubebuilder:webhook:path=/validate-agent-install-openshift-io-v1beta1-infraenv,mutating=false,failurePolicy=fail,sideEffects=None,groups=agent-install.openshift.io,resources=infraenvs,verbs=create;update,versions=v1beta1,name=vinfraenv.kb.io,admissionReviewVersions=v1
-
 var _ webhook.Validator = &InfraEnv{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type

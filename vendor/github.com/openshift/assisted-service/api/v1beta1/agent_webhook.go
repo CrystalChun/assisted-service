@@ -38,8 +38,6 @@ func (r *Agent) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-//+kubebuilder:webhook:path=/validate-agent-install-openshift-io-v1beta1-agent,mutating=false,failurePolicy=fail,sideEffects=None,groups=agent-install.openshift.io,resources=agents,verbs=create;update,versions=v1beta1,name=vagent.kb.io,admissionReviewVersions=v1
-
 var _ webhook.Validator = &Agent{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
