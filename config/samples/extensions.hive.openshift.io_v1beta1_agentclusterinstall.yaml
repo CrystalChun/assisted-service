@@ -1,0 +1,9 @@
+apiVersion: extensions.hive.openshift.io.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  labels:
+    app.kubernetes.io/name: assisted-service-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: agentclusterinstall-sample
+spec:
+  # TODO(user): Add fields here
