@@ -200,15 +200,16 @@ func (r *ClusterDeploymentsReconciler) Reconcile(origCtx context.Context, req ct
 		log.WithError(err).Error("error setting owner reference")
 		return ctrl.Result{Requeue: true}, err
 	}
+	pullSecret, releaseImage, err := r.validateClusterDeployment(ctx, req.NamespacedName, clusterDeployment, clusterInstall)
+	if err != nil {
+		log.Error(err)
+		return r.updateStatus(ctx, log, clusterInstall, clusterDeployment, nil, err)
+	}
 
 	cluster, err := r.Installer.GetClusterByKubeKey(req.NamespacedName)
-	if err1 := r.validateClusterDeployment(clusterDeployment, clusterInstall); err1 != nil {
-		log.Error(err1)
-		return r.updateStatus(ctx, log, clusterInstall, clusterDeployment, cluster, err1)
-	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if !isInstalled(clusterDeployment, clusterInstall) {
-			return r.createNewCluster(ctx, log, req.NamespacedName, clusterDeployment, clusterInstall)
+			return r.createNewCluster(ctx, log, req.NamespacedName, pullSecret, releaseImage, clusterDeployment, clusterInstall)
 		}
 
 		return r.createNewDay2Cluster(ctx, log, req.NamespacedName, clusterDeployment, clusterInstall)
@@ -256,14 +257,30 @@ func (r *ClusterDeploymentsReconciler) Reconcile(origCtx context.Context, req ct
 	return r.updateStatus(ctx, log, clusterInstall, clusterDeployment, cluster, nil)
 }
 
-func (r *ClusterDeploymentsReconciler) validateClusterDeployment(clusterDeployment *hivev1.ClusterDeployment,
-	clusterInstall *hiveext.AgentClusterInstall) error {
-
-	// Make sure that the ImageSetRef is set for clusters not already installed
-	if clusterInstall.Spec.ImageSetRef == nil && !clusterDeployment.Spec.Installed {
-		return newInputError("missing ImageSetRef for cluster that is not installed")
+// validateClusterDeployment ensures that the cluster deployment's pull secret and release image are valid
+func (r *ClusterDeploymentsReconciler) validateClusterDeployment(ctx context.Context, key types.NamespacedName, clusterDeployment *hivev1.ClusterDeployment,
+	clusterInstall *hiveext.AgentClusterInstall) (string, *models.ReleaseImage, error) {
+	// Ensure the pull secret is valid
+	pullSecret, err := r.PullSecretHandler.GetValidPullSecret(ctx, getPullSecretKey(key.Namespace, clusterDeployment.Spec.PullSecretRef))
+	if err != nil {
+		return "", nil, errors.WithMessagef(err, "failed to validate pull secret for ClusterDeployment %s/%s", clusterDeployment.Name, clusterDeployment.Namespace)
 	}
-	return nil
+
+	// Make sure that the ImageSetRef is set
+	if clusterInstall.Spec.ImageSetRef == nil {
+		// ImageSetRef is not required for installed clusters
+		if clusterDeployment.Spec.Installed {
+			return "", nil, nil
+		}
+		return "", nil, newInputError("ClusterImageSet must be set on AgentClusterInstall.Spec.ImageSetRef")
+	}
+
+	releaseImage, err := r.getReleaseImage(ctx, clusterInstall.Spec.ImageSetRef.Name, pullSecret)
+	if err != nil {
+		return "", nil, errors.WithMessagef(err, "failed to get release image for cluster %s", clusterDeployment.Name)
+	}
+
+	return pullSecret, releaseImage, err
 }
 
 func (r *ClusterDeploymentsReconciler) agentClusterInstallFinalizer(ctx context.Context, log logrus.FieldLogger, req ctrl.Request,
@@ -1353,27 +1370,15 @@ func (r *ClusterDeploymentsReconciler) createNewCluster(
 	ctx context.Context,
 	log logrus.FieldLogger,
 	key types.NamespacedName,
+	pullSecret string,
+	releaseImage *models.ReleaseImage,
 	clusterDeployment *hivev1.ClusterDeployment,
 	clusterInstall *hiveext.AgentClusterInstall) (ctrl.Result, error) {
 
 	log.Infof("Creating a new cluster %s %s", clusterDeployment.Name, clusterDeployment.Namespace)
-	spec := clusterDeployment.Spec
-
-	pullSecret, err := r.PullSecretHandler.GetValidPullSecret(ctx, getPullSecretKey(key.Namespace, spec.PullSecretRef))
-	if err != nil {
-		log.WithError(err).Error("failed to get pull secret")
-		return r.updateStatus(ctx, log, clusterInstall, clusterDeployment, nil, err)
-	}
-
-	releaseImage, err := r.getReleaseImage(ctx, log, clusterInstall.Spec, pullSecret)
-	if err != nil {
-		log.WithError(err).Error("Failed to get release image")
-		_, _ = r.updateStatus(ctx, log, clusterInstall, clusterDeployment, nil, err)
-		// The controller will requeue after one minute, giving the user a chance to fix releaseImage
-		return ctrl.Result{Requeue: true, RequeueAfter: longerRequeueAfterOnError}, nil
-	}
 
 	var ignitionEndpoint *models.IgnitionEndpoint
+	var err error
 	if clusterInstall.Spec.IgnitionEndpoint != nil {
 		ignitionEndpoint, err = r.parseIgnitionEndpoint(ctx, clusterInstall.Spec.IgnitionEndpoint)
 		if err != nil {
@@ -1440,14 +1445,13 @@ func (r *ClusterDeploymentsReconciler) createNewDay2Cluster(
 
 func (r *ClusterDeploymentsReconciler) getReleaseImage(
 	ctx context.Context,
-	log logrus.FieldLogger,
-	spec hiveext.AgentClusterInstallSpec,
+	clusterImageSetName string,
 	pullSecret string) (*models.ReleaseImage, error) {
 
 	clusterImageSet := &hivev1.ClusterImageSet{}
 	key := types.NamespacedName{
 		Namespace: "",
-		Name:      spec.ImageSetRef.Name,
+		Name:      clusterImageSetName,
 	}
 	if err := r.Client.Get(ctx, key, clusterImageSet); err != nil {
 		return nil, errors.Wrapf(err, "failed to get cluster image set %s", key.Name)
@@ -1464,9 +1468,8 @@ func (r *ClusterDeploymentsReconciler) getReleaseImage(
 				errMsgSuffix = fmt.Sprintf("Release image %q uses a tag (%q), this is usually unsupported in combination with mirror registries, try providing a digest-based image instead", clusterImageSet.Spec.ReleaseImage, ref.Tag)
 			}
 		}
-		log.Error(err)
 		errMsg := "failed to get release image '%s'. Please ensure the releaseImage field in ClusterImageSet '%s' is valid, %s (error: %s)."
-		return nil, errors.New(fmt.Sprintf(errMsg, clusterImageSet.Spec.ReleaseImage, spec.ImageSetRef.Name, errMsgSuffix, err.Error()))
+		return nil, errors.New(fmt.Sprintf(errMsg, clusterImageSet.Spec.ReleaseImage, clusterImageSetName, errMsgSuffix, err.Error()))
 	}
 
 	return releaseImage, nil
