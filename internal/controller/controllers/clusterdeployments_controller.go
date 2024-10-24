@@ -1,3 +1,6 @@
+// CRYSTAL: no other instances of get release image is called other than when a cluster is created and
+// that stores the clusterimageset created in the cache (unless there's already an openshift version and
+// architecture that matches that image... )
 /*
 Copyright 2020.
 
@@ -976,6 +979,7 @@ func (r *ClusterDeploymentsReconciler) updateNetworkParams(clusterDeployment *hi
 	return swag.Bool(update), nil
 }
 
+// CRYSTAL: we don't check for cluster image set/version/arch updates?
 func (r *ClusterDeploymentsReconciler) updateIfNeeded(ctx context.Context,
 	log logrus.FieldLogger,
 	clusterDeployment *hivev1.ClusterDeployment,
@@ -1267,6 +1271,7 @@ func (r *ClusterDeploymentsReconciler) addCustomManifests(ctx context.Context, l
 	return r.syncManifests(ctx, log, cluster, clusterInstall, alreadyCreatedManifests)
 }
 
+// CRYSTAL: Another issue - we don't store the clusterimageset used, just the arch and image version
 func CreateClusterParams(clusterDeployment *hivev1.ClusterDeployment, clusterInstall *hiveext.AgentClusterInstall,
 	pullSecret string, releaseImageVersion string, releaseImageCPUArch string,
 	ignitionEndpoint *models.IgnitionEndpoint) *models.ClusterCreateParams {
@@ -1365,6 +1370,11 @@ func (r *ClusterDeploymentsReconciler) createNewCluster(
 		return r.updateStatus(ctx, log, clusterInstall, clusterDeployment, nil, err)
 	}
 
+	// CRYSTAL: maybe we can call get release image when checking if cluster install is set to always ensure
+	// the image is present in the cache? instead of only when we create a cluster...
+	// But that could cause issues of it just calling this a lot so maybe when changed...? but how
+	// do we keep track of that -
+	// or what if we just keep calling this until the cluster is already installing?
 	releaseImage, err := r.getReleaseImage(ctx, log, clusterInstall.Spec, pullSecret)
 	if err != nil {
 		log.WithError(err).Error("Failed to get release image")
@@ -1452,7 +1462,7 @@ func (r *ClusterDeploymentsReconciler) getReleaseImage(
 	if err := r.Client.Get(ctx, key, clusterImageSet); err != nil {
 		return nil, errors.Wrapf(err, "failed to get cluster image set %s", key.Name)
 	}
-
+	//CRYSTAL: this is the only place GetReleaseImageByURL is used in the entire codebase
 	releaseImage, err := r.VersionsHandler.GetReleaseImageByURL(ctx, clusterImageSet.Spec.ReleaseImage, pullSecret)
 	if err != nil {
 		errMsgSuffix := ""
