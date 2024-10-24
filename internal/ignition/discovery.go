@@ -209,6 +209,7 @@ func (ib *ignitionBuilder) shouldAppendOKDFiles(ctx context.Context, infraEnv *c
 	if cfg.OKDRPMsImage != "" {
 		return cfg.OKDRPMsImage, true
 	}
+	//CRYSTAL: we should NOT loop over all clusterimagesets when we do a get for the image, it should be a separate, non-blocking operation if we want to store them
 	// Check if selected payload contains `okd-rpms` image
 	releaseImage, err := ib.versionHandler.GetReleaseImage(ctx, infraEnv.OpenshiftVersion, infraEnv.CPUArchitecture, infraEnv.PullSecret)
 	if err != nil {
@@ -339,7 +340,7 @@ func (ib *ignitionBuilder) FormatDiscoveryIgnitionFile(ctx context.Context, infr
 		ignitionParams["MirrorRegistriesConfig"] = base64.StdEncoding.EncodeToString(registriesContents)
 		ignitionParams["MirrorRegistriesCAConfig"] = base64.StdEncoding.EncodeToString(caContents)
 	}
-
+	// CRYSTAL should append okd files calls getreleaseimage
 	if okdRpmsImage, ok := ib.shouldAppendOKDFiles(ctx, infraEnv, cfg); ok {
 		okdBinariesOverlay := fmt.Sprintf(okdBinariesOverlayTemplate, okdRpmsImage)
 		ignitionParams["OKDBinaries"] = base64.StdEncoding.EncodeToString([]byte(okdBinariesOverlay))

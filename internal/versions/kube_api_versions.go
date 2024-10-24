@@ -92,7 +92,7 @@ func (h *kubeAPIVersionsHandler) GetReleaseImage(ctx context.Context, openshiftV
 			}
 		}(clusterImageSet)
 	}
-	wg.Wait()
+	wg.Wait() // CRYSTAL: TODO improve this - it could take a reallllly long time with a ton of cluster image sets deployed like acm/mce
 
 	return h.getReleaseImageFromCache(openshiftVersion, cpuArchitecture)
 }
@@ -224,6 +224,9 @@ func (h *kubeAPIVersionsHandler) addReleaseImage(releaseImageUrl, pullSecret str
 	defer h.imagesLock.Unlock()
 
 	// Fetch ReleaseImage if exists (not using GetReleaseImage as we search for the x.y.z image only)
+	// CRYSTAL: ok why do we do this? Why not just store it immediately? Anytime we call addReleaseImage we already check
+	// the cache in the original caller
+	// also if we explicitly want to store an image from a certain url, shouldn't we also match the url?
 	releaseImage := funk.Find(h.releaseImages, func(releaseImage *models.ReleaseImage) bool {
 		return *releaseImage.OpenshiftVersion == ocpReleaseVersion && *releaseImage.CPUArchitecture == cpuArchitecture
 	})
