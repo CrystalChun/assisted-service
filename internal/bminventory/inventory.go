@@ -4598,7 +4598,7 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(
 		// certs. We need to strip them out to not bother assisted users with this
 		// quirk.
 		params.InfraenvCreateParams.AdditionalTrustBundle = strings.TrimSpace(params.InfraenvCreateParams.AdditionalTrustBundle)
-
+		// CRYSTAL only looks at cache here
 		if err = b.validateInfraEnvCreateParams(ctx, params, cluster); err != nil {
 			return common.NewApiError(http.StatusBadRequest, err)
 		}
@@ -4705,6 +4705,8 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(
 
 		if params.InfraenvCreateParams.IgnitionConfigOverride != "" {
 			var discoveryIgnition string
+
+			//CRYSTAL this goes through clusterimagesets
 			discoveryIgnition, err = b.IgnitionBuilder.FormatDiscoveryIgnitionFile(
 				ctx, &infraEnv, b.IgnitionConfig,
 				false, b.authHandler.AuthType(), string(params.InfraenvCreateParams.ImageType))
