@@ -55,6 +55,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -109,10 +110,6 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 			"agent_namespace": req.Namespace,
 		})
 
-	defer func() {
-		log.Info("Agent Reconcile ended")
-	}()
-
 	log.Info("Agent Reconcile started")
 
 	agent := &aiv1beta1.Agent{}
@@ -123,6 +120,21 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 	}
 	log = log.WithFields(logrus.Fields{"hostname": getAgentHostname(agent)})
 
+	patchHelper, err := patch.NewHelper(agent, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		// Patch ObservedGeneration only if the reconciliation completed successfully
+		patchOpts := []patch.Option{}
+
+		patchOpts = append(patchOpts, patch.WithStatusObservedGeneration{})
+
+		if err := patchHelper.Patch(ctx, agent, patchOpts...); err != nil {
+			log.Error(err)
+		}
+		log.Info("Agent Reconcile ended")
+	}()
 	origAgent := agent.DeepCopy()
 	if agent.ObjectMeta.Labels == nil {
 		agent.ObjectMeta.Labels = make(map[string]string)
@@ -148,7 +160,7 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Restoring the Host according to values from Agent
-			if err = r.restoreHostByAgent(ctx, agent); err != nil {
+			if err = r.restoreHostByAgent(ctx, agent, log); err != nil {
 				log.WithError(err).Errorf("failed to restore Host %s according to the Agent", agent.Name)
 				return ctrl.Result{RequeueAfter: defaultRequeueAfterOnError}, err
 			}
@@ -1300,7 +1312,7 @@ func (r *AgentReconciler) updateNtpSources(log logrus.FieldLogger, host *models.
 
 func (r *AgentReconciler) updateInventoryAndLabels(log logrus.FieldLogger, ctx context.Context, host *models.Host, agent *aiv1beta1.Agent) error {
 	if host.Inventory == "" {
-		log.Debugf("Skip update inventory: Host %s inventory not set", agent.Name)
+		log.Infof("Skip update inventory: Host %s inventory not set", agent.Name)
 		return nil
 	}
 	var inventory models.Inventory
@@ -1764,7 +1776,7 @@ func (r *AgentReconciler) updateHostInstallProgress(ctx context.Context, host *m
 	return err
 }
 
-func (r *AgentReconciler) restoreHostByAgent(ctx context.Context, agent *aiv1beta1.Agent) error {
+func (r *AgentReconciler) restoreHostByAgent(ctx context.Context, agent *aiv1beta1.Agent, log logrus.FieldLogger) error {
 	// Get InfraEnv
 	infraEnvName, exist := agent.Labels[aiv1beta1.InfraEnvNameLabel]
 	if !exist {
@@ -1802,7 +1814,7 @@ func (r *AgentReconciler) restoreHostByAgent(ctx context.Context, agent *aiv1bet
 		clusterID = cluster.ID
 	}
 
-	host, err := createNewHost(agent, clusterID, *infraEnv.ID)
+	host, err := createNewHost(agent, clusterID, *infraEnv.ID, r.Log)
 	if err != nil {
 		r.Log.WithError(err).Errorf("Failed to create Host with name '%s'", agent.Name)
 		return err
@@ -1811,7 +1823,12 @@ func (r *AgentReconciler) restoreHostByAgent(ctx context.Context, agent *aiv1bet
 	return r.Installer.CreateHostInKubeKeyNamespace(ctx, key, host)
 }
 
-func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strfmt.UUID) (*models.Host, error) {
+func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strfmt.UUID, log logrus.FieldLogger) (*models.Host, error) {
+	role := agent.Spec.Role
+
+	log.Infof("ROLE NOT EMPTY %s", agent.Status.Role)
+	role = agent.Status.Role
+
 	// Create Intentory
 	hostInventory := models.Inventory{}
 	manufacturer, exist := agent.Labels[AgentLabelHostManufacturer]
@@ -1819,6 +1836,28 @@ func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strf
 		hostInventory.SystemVendor = &models.SystemVendor{}
 		hostInventory.SystemVendor.Manufacturer = manufacturer
 	}
+	//statusInventory := json.Unmarshal(agent.Status.Inventory, hostInventory)
+	if agent.Status.Inventory.BmcAddress != "" {
+		log.Infof("BMCADDRESS NOT EMPTY %s", agent.Status.Role)
+		hostInventory.BmcAddress = agent.Status.Inventory.BmcAddress
+	}
+	hostInventory.BmcV6address = agent.Status.Inventory.BmcV6address
+	allInterfaces := make([]*models.Interface, 0)
+	log.Infof("AGENT STATUS INVENTORY %s", agent.Status.Inventory.Interfaces)
+	for _, intf := range agent.Status.Inventory.Interfaces {
+		inv := models.Interface{
+			IPV4Addresses: intf.IPV4Addresses,
+			IPV6Addresses: intf.IPV6Addresses,
+			Flags:         intf.Flags,
+			MacAddress:    intf.MacAddress,
+			Name:          intf.Name,
+			Biosdevname:   intf.Biosdevname,
+			Vendor:        intf.Vendor,
+		}
+		allInterfaces = append(allInterfaces, &inv)
+	}
+	hostInventory.Interfaces = allInterfaces
+	hostInventory.Hostname = agent.Status.Inventory.Hostname
 	inventory, err := json.Marshal(hostInventory)
 	if err != nil {
 		return nil, errors.New("Failed to marshal agent's inventory")
@@ -1826,29 +1865,38 @@ func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strf
 
 	// Fetch State
 	var hostStatus string
-	if state, has_annotation := agent.GetAnnotations()[AgentStateAnnotation]; has_annotation {
-		hostStatus = state
-	} else {
-		if clusterID != nil {
-			hostStatus = models.HostStatusKnown
-		} else {
-			hostStatus = models.HostStatusKnownUnbound
-		}
+	/* 	if state, has_annotation := agent.GetAnnotations()[AgentStateAnnotation]; has_annotation {
+	   		hostStatus = state
+	   	} else {
+	   		if clusterID != nil {
+	   			hostStatus = models.HostStatusKnown
+	   		} else {
+	   			hostStatus = models.HostStatusKnownUnbound
+	   		}
+	   	} */
+
+	if agent.Status.Progress.CurrentStage != "" {
+		hostStatus = string(agent.Status.Progress.CurrentStage)
 	}
 
+	validationsInfo, err := json.Marshal(agent.Status.ValidationsInfo)
+	if err != nil {
+		log.WithError(err).Errorf("failed to marshal validations Info")
+	}
 	// Create Host model
 	hostID := strfmt.UUID(agent.Name)
 	host := &models.Host{
-		ID:            &hostID,
-		Kind:          swag.String(models.HostKindHost),
-		RegisteredAt:  strfmt.DateTime(agent.CreationTimestamp.Time),
-		CheckedInAt:   strfmt.DateTime(agent.CreationTimestamp.Time),
-		Role:          agent.Spec.Role,
-		SuggestedRole: agent.Spec.Role,
-		ClusterID:     clusterID,
-		InfraEnvID:    infraEnvID,
-		Status:        &hostStatus,
-		Inventory:     string(inventory),
+		ID:              &hostID,
+		Kind:            swag.String(models.HostKindHost),
+		RegisteredAt:    strfmt.DateTime(agent.CreationTimestamp.Time),
+		CheckedInAt:     strfmt.DateTime(agent.CreationTimestamp.Time),
+		Role:            role,
+		SuggestedRole:   role,
+		ClusterID:       clusterID,
+		InfraEnvID:      infraEnvID,
+		Status:          &hostStatus,
+		Inventory:       string(inventory),
+		ValidationsInfo: string(validationsInfo),
 	}
 
 	return host, nil

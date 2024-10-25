@@ -159,7 +159,7 @@ func (r *ClusterDeploymentsReconciler) Reconcile(origCtx context.Context, req ct
 	}
 
 	aciName := clusterDeployment.Spec.ClusterInstallRef.Name
-	err := r.Get(ctx,
+	err := r.APIReader.Get(ctx,
 		types.NamespacedName{
 			Namespace: clusterDeployment.Namespace,
 			Name:      aciName,
