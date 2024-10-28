@@ -118,7 +118,7 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	log = log.WithFields(logrus.Fields{"hostname": getAgentHostname(agent)})
-
+	log.Infof("AGENT STATUS starting: %+v", agent.Status)
 	patchHelper, err := patch.NewHelper(agent, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -128,7 +128,7 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 		patchOpts := []patch.Option{}
 
 		patchOpts = append(patchOpts, patch.WithStatusObservedGeneration{})
-
+		log.Infof("AGENT STATUS ending: %+v", agent.Status)
 		if err := patchHelper.Patch(ctx, agent, patchOpts...); err != nil {
 			log.Error(err)
 		}
@@ -470,9 +470,9 @@ func (r *AgentReconciler) handleAgentFinalizer(ctx context.Context, log logrus.F
 		// Register a finalizer if it is absent.
 		if !funk.ContainsString(agent.GetFinalizers(), AgentFinalizerName) {
 			controllerutil.AddFinalizer(agent, AgentFinalizerName)
-			if err := r.Update(ctx, agent); err != nil {
+			/* 			if err := r.Update(ctx, agent); err != nil {
 				log.WithError(err).Errorf("failed to add finalizer %s to resource %s %s", AgentFinalizerName, agent.Name, agent.Namespace)
-			}
+			} */
 			// After update there should not be any more changes on the object
 			// Update will return a new object so the creation of maps like annotations or labels is not valid anymore
 			return &ctrl.Result{Requeue: true}, nil
@@ -509,10 +509,10 @@ func (r *AgentReconciler) handleAgentFinalizer(ctx context.Context, log logrus.F
 			}
 			// remove our finalizer from the list and update it.
 			controllerutil.RemoveFinalizer(agent, AgentFinalizerName)
-			if err := r.Update(ctx, agent); err != nil {
+			/* 			if err := r.Update(ctx, agent); err != nil {
 				log.WithError(err).Errorf("failed to remove finalizer %s from resource %s %s", AgentFinalizerName, agent.Name, agent.Namespace)
 				return &ctrl.Result{Requeue: true}, err
-			}
+			} */
 		}
 		// Stop reconciliation as the item is being deleted
 		return &ctrl.Result{}, nil
@@ -1445,7 +1445,7 @@ func (r *AgentReconciler) updateLabels(log logrus.FieldLogger, ctx context.Conte
 	changed = setAgentLabel(log, agent, AgentLabelClusterDeploymentNamespace, namespace) || changed
 
 	if changed {
-		return r.updateAndReplaceAgent(ctx, agent)
+		//return r.updateAndReplaceAgent(ctx, agent)
 	}
 
 	return nil
@@ -1720,7 +1720,7 @@ func (r *AgentReconciler) setInfraEnvNameLabel(ctx context.Context, log logrus.F
 		return errors.Errorf("infraEnv %s name is nil", h.InfraEnvID)
 	}
 	if setAgentLabel(log, agent, aiv1beta1.InfraEnvNameLabel, *infraEnv.Name) {
-		return r.updateAndReplaceAgent(ctx, agent)
+		//return r.updateAndReplaceAgent(ctx, agent)
 	}
 	return nil
 }
