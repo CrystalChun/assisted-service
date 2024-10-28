@@ -72,6 +72,8 @@ const (
 	AgentLabelHasNonrotationalDisk       = InventoryLabelPrefix + "storage-hasnonrotationaldisk"
 	AgentLabelCpuArchitecture            = InventoryLabelPrefix + "cpu-architecture"
 	AgentLabelCpuVirtEnabled             = InventoryLabelPrefix + "cpu-virtenabled"
+	agentInventoryLabel                  = "agent." + aiv1beta1.Group + "/inventory"
+	agentStateLabel                      = "agent." + aiv1beta1.Group + "/state"
 	AgentLabelHostManufacturer           = InventoryLabelPrefix + "host-manufacturer"
 	AgentLabelHostProductName            = InventoryLabelPrefix + "host-productname"
 	AgentLabelHostIsVirtual              = InventoryLabelPrefix + "host-isvirtual"
@@ -1314,6 +1316,7 @@ func (r *AgentReconciler) updateInventoryAndLabels(log logrus.FieldLogger, ctx c
 		log.Infof("Skip update inventory: Host %s inventory not set", agent.Name)
 		return nil
 	}
+	agent.Annotations[agentInventoryLabel] = host.Inventory
 	var inventory models.Inventory
 	if err := json.Unmarshal([]byte(host.Inventory), &inventory); err != nil {
 		log.WithError(err).Errorf("Failed to unmarshal host inventory")
@@ -1835,47 +1838,44 @@ func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strf
 		hostInventory.SystemVendor.Manufacturer = manufacturer
 	}
 	//statusInventory := json.Unmarshal(agent.Status.Inventory, hostInventory)
-	if agent.Status.Inventory.BmcAddress != "" {
-		log.Infof("BMCADDRESS NOT EMPTY %s", agent.Status.Role)
-		hostInventory.BmcAddress = agent.Status.Inventory.BmcAddress
-	}
-	hostInventory.BmcV6address = agent.Status.Inventory.BmcV6address
-	allInterfaces := make([]*models.Interface, 0)
-	log.Infof("AGENT STATUS INVENTORY %s", agent.Status.Inventory.Interfaces)
-	for _, intf := range agent.Status.Inventory.Interfaces {
-		inv := models.Interface{
-			IPV4Addresses: intf.IPV4Addresses,
-			IPV6Addresses: intf.IPV6Addresses,
-			Flags:         intf.Flags,
-			MacAddress:    intf.MacAddress,
-			Name:          intf.Name,
-			Biosdevname:   intf.Biosdevname,
-			Vendor:        intf.Vendor,
-		}
-		allInterfaces = append(allInterfaces, &inv)
-	}
-	hostInventory.Interfaces = allInterfaces
-	hostInventory.Hostname = agent.Status.Inventory.Hostname
-	inventory, err := json.Marshal(hostInventory)
-	if err != nil {
-		return nil, errors.New("Failed to marshal agent's inventory")
-	}
-
-	// Fetch State
-	var hostStatus string
-	/* 	if state, has_annotation := agent.GetAnnotations()[AgentStateAnnotation]; has_annotation {
-	   		hostStatus = state
-	   	} else {
-	   		if clusterID != nil {
-	   			hostStatus = models.HostStatusKnown
-	   		} else {
-	   			hostStatus = models.HostStatusKnownUnbound
+	/* 	if agent.Status.Inventory.BmcAddress != "" {
+	   		log.Infof("BMCADDRESS NOT EMPTY %s", agent.Status.Role)
+	   		hostInventory.BmcAddress = agent.Status.Inventory.BmcAddress
+	   	}
+	   	hostInventory.BmcV6address = agent.Status.Inventory.BmcV6address
+	   	allInterfaces := make([]*models.Interface, 0)
+	   	log.Infof("AGENT STATUS INVENTORY %s", agent.Status.Inventory.Interfaces)
+	   	for _, intf := range agent.Status.Inventory.Interfaces {
+	   		inv := models.Interface{
+	   			IPV4Addresses: intf.IPV4Addresses,
+	   			IPV6Addresses: intf.IPV6Addresses,
+	   			Flags:         intf.Flags,
+	   			MacAddress:    intf.MacAddress,
+	   			Name:          intf.Name,
+	   			Biosdevname:   intf.Biosdevname,
+	   			Vendor:        intf.Vendor,
 	   		}
+	   		allInterfaces = append(allInterfaces, &inv)
+	   	}
+	   	hostInventory.Interfaces = allInterfaces
+	   	hostInventory.Hostname = agent.Status.Inventory.Hostname
+	   	inventory, err := json.Marshal(hostInventory)
+	   	if err != nil {
+	   		return nil, errors.New("Failed to marshal agent's inventory")
 	   	} */
 
-	if agent.Status.Progress.CurrentStage != "" {
-		hostStatus = string(agent.Status.Progress.CurrentStage)
+	inventory := agent.Annotations[agentInventoryLabel]
+
+	// Fetch State
+	hostStatus := agent.Labels[agentStateLabel]
+	if state, has_annotation := agent.GetAnnotations()[AgentStateAnnotation]; has_annotation {
+		log.Infof("Found state annotation %s", state)
+		hostStatus = state
 	}
+
+	/* if agent.Status.Progress.CurrentStage != "" {
+		hostStatus = string(agent.Status.Progress.CurrentStage)
+	} */
 
 	validationsInfo, err := json.Marshal(agent.Status.ValidationsInfo)
 	if err != nil {
@@ -1893,7 +1893,7 @@ func createNewHost(agent *v1beta1.Agent, clusterID *strfmt.UUID, infraEnvID strf
 		ClusterID:       clusterID,
 		InfraEnvID:      infraEnvID,
 		Status:          &hostStatus,
-		Inventory:       string(inventory),
+		Inventory:       inventory,
 		ValidationsInfo: string(validationsInfo),
 	}
 
