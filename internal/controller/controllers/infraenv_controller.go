@@ -55,7 +55,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -904,12 +903,12 @@ func (r *InfraEnvReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return reply
 	}
 
-	infraEnvUpdates := r.CRDEventsHandler.GetInfraEnvUpdates()
+	//infraEnvUpdates := r.CRDEventsHandler.GetInfraEnvUpdates()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1beta1.InfraEnv{}).
 		Watches(&aiv1beta1.NMStateConfig{}, handler.EnqueueRequestsFromMapFunc(mapNMStateConfigToInfraEnv)).
 		Watches(&hivev1.ClusterDeployment{}, handler.EnqueueRequestsFromMapFunc(mapClusterDeploymentToInfraEnv)).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapPullSecretToInfraEnv)).
-		WatchesRawSource(&source.Channel{Source: infraEnvUpdates}, &handler.EnqueueRequestForObject{}).
+		//WatchesRawSource(&source.Channel{Source: infraEnvUpdates}, &handler.EnqueueRequestForObject{}).
 		Complete(r)
 }

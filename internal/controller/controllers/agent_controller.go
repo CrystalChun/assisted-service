@@ -61,7 +61,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -1760,8 +1759,7 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1beta1.Agent{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapSecretToAgents)).
-		WatchesRawSource(&source.Channel{Source: r.CRDEventsHandler.GetAgentUpdates()},
-			&handler.EnqueueRequestForObject{}).
+		//WatchesRawSource(source.Channel(r.CRDEventsHandler.GetAgentUpdates(), handler.TypedEventHandler[client.Object]{})).
 		Complete(r)
 }
 

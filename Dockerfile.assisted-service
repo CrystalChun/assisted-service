@@ -61,7 +61,7 @@ LABEL url https://github.com/openshift/assisted-service
 LABEL vendor "Red Hat, Inc."
 LABEL maintainer "Red Hat"
 
-COPY --from=golang /tmp/licenses /licenses
+#COPY --from=golang /tmp/licenses /licenses
 
 COPY hack/container_build_scripts/replace_dnf_repositories_ref_if_needed.sh .
 COPY hack/container_build_scripts/utils.sh .
