@@ -1,13 +1,13 @@
 ARG RHEL_VERSION=9
 
-FROM registry.access.redhat.com/ubi$RHEL_VERSION/go-toolset:1.21 AS golang
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-openshift-4.18 AS golang
 
 ADD . /app
 WORKDIR /app
 
 # Licenses
-RUN go install github.com/google/go-licenses@v1.6.0
-RUN ${HOME}/go/bin/go-licenses save --save_path /tmp/licenses ./...
+#RUN go install github.com/google/go-licenses@v1.6.0
+#RUN ${HOME}/go/bin/go-licenses save --save_path /tmp/licenses ./...
 
 # Build binaries
 FROM quay.io/centos/centos:stream$RHEL_VERSION as builder
@@ -21,7 +21,7 @@ ENV GOROOT=/usr/lib/golang
 ENV GOPATH=/opt/app-root/src/go
 ENV PATH=$PATH:$GOROOT/bin:$GOPATH/bin
 
-COPY --from=golang $GOPATH $GOPATH
+COPY --from=golang /go $GOPATH
 COPY --from=golang $GOROOT $GOROOT
 
 RUN chmod 775 -R $GOPATH && chmod 775 -R $GOROOT
