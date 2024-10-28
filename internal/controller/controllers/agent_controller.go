@@ -187,9 +187,9 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 
 	// Add/Update 'state' annotation (with host's status)
 	if setAgentAnnotation(log, agent, AgentStateAnnotation, swag.StringValue(h.Status)) {
-		if err = r.updateAndReplaceAgent(ctx, agent); err != nil {
+		/* 		if err = r.updateAndReplaceAgent(ctx, agent); err != nil {
 			log.WithError(err).Warnf("failed to set state annotation on agent %s/%s", agent.Namespace, agent.Name)
-		}
+		} */
 	}
 
 	if agent.Spec.ClusterDeploymentName == nil && h.ClusterID != nil {
@@ -901,14 +901,14 @@ func (r *AgentReconciler) updateStatus(ctx context.Context, log logrus.FieldLogg
 		setConditionsUnknown(agent)
 	}
 
-	if !reflect.DeepEqual(agent, origAgent) {
-		if updateErr := r.Status().Update(ctx, agent); updateErr != nil {
-			log.WithError(updateErr).Error("failed to update agent Status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-	} else {
-		log.Debugf("Agent %s/%s: update skipped", agent.Namespace, agent.Name)
-	}
+	/* 	if !reflect.DeepEqual(agent, origAgent) {
+	   		if updateErr := r.Status().Update(ctx, agent); updateErr != nil {
+	   			log.WithError(updateErr).Error("failed to update agent Status")
+	   			return ctrl.Result{Requeue: true}, nil
+	   		}
+	   	} else {
+	   		log.Debugf("Agent %s/%s: update skipped", agent.Namespace, agent.Name)
+	   	} */
 	if syncErr != nil && internal {
 		return ctrl.Result{RequeueAfter: defaultRequeueAfterOnError}, nil
 	}
