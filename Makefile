@@ -547,9 +547,7 @@ display-coverage:
 
 run-db-container:
 	$(CONTAINER_COMMAND) ps -q --filter "name=postgres" | xargs -r $(CONTAINER_COMMAND) kill && sleep 3
-	$(CONTAINER_COMMAND) run -d  --rm --tmpfs /var/lib/pgsql/data --name postgres -e POSTGRESQL_ADMIN_PASSWORD=admin -e POSTGRESQL_MAX_CONNECTIONS=10000 -p 127.0.0.1:5432:5432 \
-		$(PSQL_IMAGE)
-	timeout 5m ./hack/wait_for_postgres.sh
+	$(CONTAINER_COMMAND) run -d  --rm --tmpfs /var/lib/pgsql/data --name postgres -e POSTGRESQL_ADMIN_PASSWORD=admin -e POSTGRESQL_MAX_CONNECTIONS=10000 -p 127.0.0.1:5432:5432 $(PSQL_IMAGE)
 
 run-unit-test:
 	SKIP_UT_DB=1 $(MAKE) _unit_test TIMEOUT=30m TEST="$(or $(TEST),$(shell go list ./... | grep -v subsystem))"
@@ -561,7 +559,7 @@ ci-unit-test:
 kill-db-container:
 	$(CONTAINER_COMMAND) kill postgres
 
-unit-test: run-db-container run-unit-test kill-db-container
+unit-test: run-unit-test #run-db-container  kill-db-container
 
 $(REPORTS):
 	-mkdir -p $(REPORTS)

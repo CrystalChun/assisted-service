@@ -1,35 +1,36 @@
 registry: quay.io
 build-container-image: assisted-service-build
 
+# The host network is unsupported for "Docker for desktop" (which is used in macOS) but it partially works.
+# For example: creating a new Nginx container with the "host" network using the command "docker run --net host nginx"
+# doesn't open the 80 port on the host and you won't be able to access the service on the host using localhost:80.
+# From the container, it's possible to access the host ports,
+# For example create an nginx container using the command: "docker run -p 80:80 nginx"
+# Now create a new container using the command: "docker run -it --net host centos curl http://localhost:80/"
+# The centos container can access the Nginx page although it is published to the host.
+
+# The unit-test makefile target starts a new Postgres container and publishes its port to the host.
+# There is three options to access the Postgres DB:
+# 1. Create a new container on the "host" network and access it at localhost:5432
+# 2. Create a new container and access it at host.docker.internal:5432
+# 3. Access the container directly container:5432
+# We choose the first option since using the other options required a lot of changes
+build-container-net: host
+
 containers:
   assisted-service-build: Dockerfile.assisted-service-build
 volumes:
-  # programs
-  - $(which minikube || echo /usr/local/bin/minikube):/usr/local/bin/minikube
-
   # config
-  - $MINIKUBE_HOME:$MINIKUBE_HOME
   - $HOME/.minikube:$HOME/.minikube
-  - $HOME/.kube/:$HOME/.kube
-  - $KUBECONFIG:$KUBECONFIG
-  - /etc/subuid:/etc/subuid
-  - /etc/subgid:/etc/subgid
-  - /run/lock/lockdev:/run/lock/lockdev
-
+  #- $HOME/.docker/:$HOME/.docker
+  - $CONTAINER_KUBE_CONFIG:$CONTAINER_KUBE_CONFIG
   # cache
   - $HOME/.cache/go-build:/go/pkg/mod
   - $HOME/.cache/golangci-lint:$HOME/.cache/golangci-lint
-
-  # libvirt
-  - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
-  - /var/lib/libvirt/:/var/lib/libvirt/
-  - /etc/pki/tls/certs/ca-bundle.crt:/etc/pki/tls/certs/ca-bundle.crt
-
-  - $(podman info --format "{{.Host.RemoteSocket.Path}}" 2> /dev/null || echo "$XDG_RUNTIME_DIR/podman/podman.sock"):/run/podman/podman.sock
 env_file:
   - skipper.env
 env:
   GOCACHE: "/go/pkg/mod"
-  KUBECONFIG: $KUBECONFIG
-  # a podman-remote env variable: the podman socket url to use
-  CONTAINER_HOST: unix://run/podman/podman.sock
+  SKIPPER_PLATFORM: "darwin"
+  DOCKER_CONFIG: $DOCKER_CONFIG
+  KUBECONFIG: $CONTAINER_KUBE_CONFIG
