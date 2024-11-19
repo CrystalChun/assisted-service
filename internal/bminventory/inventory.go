@@ -463,12 +463,11 @@ func (b *bareMetalInventory) getOLMMonitoredOperators(log *logrus.Entry, cluster
 	return nil, nil
 }
 
-func (b *bareMetalInventory) getNewClusterReleaseImage(ctx context.Context, params *models.ClusterCreateParams, arch string) (*models.ReleaseImage, error) {
-	releaseImage, err := b.versionsHandler.GetReleaseImage(ctx, swag.StringValue(params.OpenshiftVersion),
-		arch, swag.StringValue(params.PullSecret))
+func (b *bareMetalInventory) getNewClusterReleaseImage(ctx context.Context, cluster *common.Cluster) (*models.ReleaseImage, error) {
+	releaseImage, err := b.versionsHandler.GetReleaseImage(ctx, cluster)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Openshift version %s for CPU architecture %s is not supported",
-			swag.StringValue(params.OpenshiftVersion), arch)
+			cluster.OpenshiftVersion, cluster.CPUArchitecture)
 	}
 
 	// Ensure a relevant OsImage exists. For multiarch we disabling the code below because we don't know yet
@@ -565,29 +564,6 @@ func (b *bareMetalInventory) RegisterClusterInternal(
 		return nil, common.NewApiError(http.StatusBadRequest, err)
 	}
 
-	releaseImage, err := b.getNewClusterReleaseImage(ctx, params.NewClusterParams, cpuArchitecture)
-	if err != nil {
-		return nil, common.NewApiError(http.StatusBadRequest, err)
-	}
-
-	log.Infof("selected cluster release image: arch=%s, openshiftVersion=%s, url=%s",
-		swag.StringValue(releaseImage.CPUArchitecture),
-		swag.StringValue(releaseImage.OpenshiftVersion),
-		swag.StringValue(releaseImage.URL))
-
-	if len(releaseImage.CPUArchitectures) > 1 {
-		log.Infof("Setting cluster as multi-arch because of the release image (requested was %s)", cpuArchitecture)
-		cpuArchitecture = common.MultiCPUArchitecture
-		// (MGMT-11859) Additional check here ensures that the customer cannot just guess a version
-		//              with multiarch in order to get access to that release payload.
-		var multiarchAllowed bool
-		multiarchAllowed, err = b.authzHandler.HasOrgBasedCapability(ctx, ocm.MultiarchCapabilityName)
-		if err != nil || !multiarchAllowed {
-			err = common.NewApiError(http.StatusBadRequest, errors.New("multiarch clusters are not available"))
-			return nil, err
-		}
-	}
-
 	var orgSoftTimeoutsEnabled bool
 	orgSoftTimeoutsEnabled, err = b.authzHandler.HasOrgBasedCapability(ctx, ocm.SoftTimeoutsCapabilityName)
 	if err != nil {
@@ -603,15 +579,15 @@ func (b *bareMetalInventory) RegisterClusterInternal(
 
 	cluster = &common.Cluster{
 		Cluster: models.Cluster{
-			ID:                           &id,
-			Href:                         swag.String(url.String()),
-			Kind:                         swag.String(models.ClusterKindCluster),
-			APIVips:                      params.NewClusterParams.APIVips,
-			BaseDNSDomain:                params.NewClusterParams.BaseDNSDomain,
-			IngressVips:                  params.NewClusterParams.IngressVips,
-			Name:                         swag.StringValue(params.NewClusterParams.Name),
-			OpenshiftVersion:             *releaseImage.Version,
-			OcpReleaseImage:              *releaseImage.URL,
+			ID:               &id,
+			Href:             swag.String(url.String()),
+			Kind:             swag.String(models.ClusterKindCluster),
+			APIVips:          params.NewClusterParams.APIVips,
+			BaseDNSDomain:    params.NewClusterParams.BaseDNSDomain,
+			IngressVips:      params.NewClusterParams.IngressVips,
+			Name:             swag.StringValue(params.NewClusterParams.Name),
+			OpenshiftVersion: *params.NewClusterParams.OpenshiftVersion,
+			//OcpReleaseImage:              *releaseImage.URL,
 			SSHPublicKey:                 params.NewClusterParams.SSHPublicKey,
 			UserName:                     ocm.UserNameFromContext(ctx),
 			OrgID:                        ocm.OrgIDFromContext(ctx),
@@ -641,6 +617,28 @@ func (b *bareMetalInventory) RegisterClusterInternal(
 		KubeKeyNamespace:            kubeKey.Namespace,
 		TriggerMonitorTimestamp:     time.Now(),
 		MachineNetworkCidrUpdatedAt: time.Now(),
+	}
+	releaseImage, err := b.getNewClusterReleaseImage(ctx, cluster)
+	if err != nil {
+		return nil, common.NewApiError(http.StatusBadRequest, err)
+	}
+
+	log.Infof("selected cluster release image: arch=%s, openshiftVersion=%s, url=%s",
+		swag.StringValue(releaseImage.CPUArchitecture),
+		swag.StringValue(releaseImage.OpenshiftVersion),
+		swag.StringValue(releaseImage.URL))
+
+	if len(releaseImage.CPUArchitectures) > 1 {
+		log.Infof("Setting cluster as multi-arch because of the release image (requested was %s)", cpuArchitecture)
+		cpuArchitecture = common.MultiCPUArchitecture
+		// (MGMT-11859) Additional check here ensures that the customer cannot just guess a version
+		//              with multiarch in order to get access to that release payload.
+		var multiarchAllowed bool
+		multiarchAllowed, err = b.authzHandler.HasOrgBasedCapability(ctx, ocm.MultiarchCapabilityName)
+		if err != nil || !multiarchAllowed {
+			err = common.NewApiError(http.StatusBadRequest, errors.New("multiarch clusters are not available"))
+			return nil, err
+		}
 	}
 
 	newOLMOperators, err := b.getOLMMonitoredOperators(log, cluster, params, *releaseImage.Version)
@@ -1753,7 +1751,7 @@ func (b *bareMetalInventory) generateClusterInstallConfig(ctx context.Context, c
 		return errors.Wrapf(err, "failed to get install config for cluster %s", cluster.ID)
 	}
 
-	releaseImage, err := b.versionsHandler.GetReleaseImage(ctx, cluster.OpenshiftVersion, cluster.CPUArchitecture, cluster.PullSecret)
+	releaseImage, err := b.versionsHandler.GetReleaseImage(ctx, &cluster)
 	if err != nil {
 		msg := fmt.Sprintf("failed to get OpenshiftVersion for cluster %s with openshift version %s", cluster.ID, cluster.OpenshiftVersion)
 		log.WithError(err).Errorf(msg)
@@ -1762,7 +1760,7 @@ func (b *bareMetalInventory) generateClusterInstallConfig(ctx context.Context, c
 
 	installerReleaseImageOverride := ""
 	if isBaremetalBinaryFromAnotherReleaseImageRequired(cluster.CPUArchitecture, cluster.OpenshiftVersion) {
-		defaultArchImage, err := b.versionsHandler.GetReleaseImage(ctx, cluster.OpenshiftVersion, common.DefaultCPUArchitecture, cluster.PullSecret)
+		defaultArchImage, err := b.versionsHandler.GetReleaseImage(ctx, &cluster)
 		if err != nil {
 			msg := fmt.Sprintf("failed to get image for installer image override "+
 				"for cluster %s with openshift version %s and %s arch", cluster.ID, cluster.OpenshiftVersion, cluster.CPUArchitecture)

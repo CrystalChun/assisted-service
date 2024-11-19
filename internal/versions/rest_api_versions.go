@@ -29,18 +29,18 @@ type restAPIVersionsHandler struct {
 // If the provided OpenShift version includes a patch version, it attempts to retrieve an exact match for the release image if available.
 // For OpenShift versions specified as major.minor, it fetches the latest matching release image.
 // The function returns an error Returns an error for other formats of OpenShift version or if no matching image can be found.
-func (h *restAPIVersionsHandler) GetReleaseImage(_ context.Context, openshiftVersion, cpuArchitecture, _ string) (*models.ReleaseImage, error) {
-	cpuArchitecture = common.NormalizeCPUArchitecture(cpuArchitecture)
+func (h *restAPIVersionsHandler) GetReleaseImage(_ context.Context, cluster *common.Cluster) (*models.ReleaseImage, error) {
+	cpuArchitecture := common.NormalizeCPUArchitecture(cluster.CPUArchitecture)
 	// validations
 	if err := validateCPUArchitecture(cpuArchitecture); err != nil {
 		return nil, err
 	}
-	versionFormat := common.GetVersionFormat(openshiftVersion)
+	versionFormat := common.GetVersionFormat(cluster.OpenshiftVersion)
 	if versionFormat == common.NoneVersion || versionFormat == common.MajorVersion {
 		return nil,
 			errors.Errorf(
 				"invalid openshiftVersion '%s'. Expected format: 'major.minor' or 'major.minor.patch', optionally followed by a prerelease identifier",
-				openshiftVersion,
+				cluster.OpenshiftVersion,
 			)
 	}
 
@@ -52,12 +52,12 @@ func (h *restAPIVersionsHandler) GetReleaseImage(_ context.Context, openshiftVer
 
 	// Find the exact version
 	if versionFormat == common.MajorMinorPatchVersion {
-		query = query.Where("version = ?", openshiftVersion)
+		query = query.Where("version = ?", cluster.OpenshiftVersion)
 		var releaseImage models.ReleaseImage
 		err := query.Take(&releaseImage).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, errors.Errorf("no release image found for openshiftVersion: '%s' and CPU architecture '%s'", openshiftVersion, cpuArchitecture)
+				return nil, errors.Errorf("no release image found for openshiftVersion: '%s' and CPU architecture '%s'", cluster.OpenshiftVersion, cpuArchitecture)
 			}
 
 			return nil, err
@@ -72,7 +72,7 @@ func (h *restAPIVersionsHandler) GetReleaseImage(_ context.Context, openshiftVer
 
 	// openshiftVersion must be major.minor, find the latest version matching
 
-	query = query.Where("openshift_version = ?", openshiftVersion)
+	query = query.Where("openshift_version = ?", cluster.OpenshiftVersion)
 	var releaseImages models.ReleaseImages
 	err := query.Find(&releaseImages).Error
 	if err != nil {
@@ -80,7 +80,7 @@ func (h *restAPIVersionsHandler) GetReleaseImage(_ context.Context, openshiftVer
 	}
 
 	if len(releaseImages) == 0 {
-		return nil, errors.Errorf("no release image found for openshiftVersion: '%s' and CPU architecture '%s'", openshiftVersion, cpuArchitecture)
+		return nil, errors.Errorf("no release image found for openshiftVersion: '%s' and CPU architecture '%s'", cluster.OpenshiftVersion, cpuArchitecture)
 	}
 
 	return getLatestReleaseImage(releaseImages, h.ignoredOpenshiftVersions)
@@ -107,16 +107,10 @@ func (h *restAPIVersionsHandler) GetReleaseImageByURL(_ context.Context, url, _ 
 // If the configuration does not include a must-gather image for the given version and architecture,
 // the function attempts to locate a matching release image. It then uses the 'oc' CLI tool to find and add the corresponding
 // OCP must-gather image.
-func (h *restAPIVersionsHandler) GetMustGatherImages(openshiftVersion, cpuArchitecture, pullSecret string) (MustGatherVersion, error) {
-	if cpuArchitecture == common.AARCH64CPUArchitecture {
-		cpuArchitecture = common.ARM64CPUArchitecture
-	}
-
+func (h *restAPIVersionsHandler) GetMustGatherImages(cluster *common.Cluster) (MustGatherVersion, error) {
 	return getMustGatherImages(
 		h.log,
-		openshiftVersion,
-		cpuArchitecture,
-		pullSecret,
+		cluster,
 		"",
 		h.mustGatherVersions,
 		h.GetReleaseImage,

@@ -23,9 +23,9 @@ import (
 
 //go:generate mockgen --build_flags=--mod=mod -package versions -destination mock_versions.go -self_package github.com/openshift/assisted-service/internal/versions . Handler
 type Handler interface {
-	GetReleaseImage(ctx context.Context, openshiftVersion, cpuArchitecture, pullSecret string) (*models.ReleaseImage, error)
+	GetReleaseImage(ctx context.Context, cluster *common.Cluster) (*models.ReleaseImage, error)
 	GetReleaseImageByURL(ctx context.Context, url, pullSecret string) (*models.ReleaseImage, error)
-	GetMustGatherImages(openshiftVersion, cpuArchitecture, pullSecret string) (MustGatherVersion, error)
+	GetMustGatherImages(cluster *common.Cluster) (MustGatherVersion, error)
 	ValidateReleaseImageForRHCOS(rhcosVersion, cpuArch string) error
 }
 
@@ -53,9 +53,13 @@ func NewHandler(
 	}
 
 	if enableKubeAPI {
+		releaseImagesCache := make(map[string]models.ReleaseImage, 0)
+		for _, releaseImage := range releaseImages {
+			releaseImagesCache[*releaseImage.URL] = *releaseImage
+		}
 		h := &kubeAPIVersionsHandler{
 			mustGatherVersions: mustGatherVersions,
-			releaseImages:      releaseImages,
+			releaseImages:      releaseImagesCache,
 			releaseHandler:     releaseHandler,
 			releaseImageMirror: releaseImageMirror,
 			log:                log,
@@ -79,22 +83,25 @@ func NewHandler(
 
 func getMustGatherImages(
 	log logrus.FieldLogger,
-	openshiftVersion,
-	cpuArchitecture,
-	pullSecret,
+	cluster *common.Cluster,
 	releaseImageMirror string,
 	mustGatherVersions MustGatherVersions,
-	getReleaseImage func(ctx context.Context, openshiftVersion, cpuArchitecture, pullSecret string) (*models.ReleaseImage, error),
+	getReleaseImage func(ctx context.Context, cluster *common.Cluster) (*models.ReleaseImage, error),
 	releaseHandler oc.Release,
 	imagesLock *sync.Mutex,
 ) (MustGatherVersion, error) {
 	imagesLock.Lock()
 	defer imagesLock.Unlock()
 
-	majMinorVersion, err := common.GetMajorMinorVersion(openshiftVersion)
+	majMinorVersion, err := common.GetMajorMinorVersion(cluster.OpenshiftVersion)
 	if err != nil {
 		return nil, err
 	}
+	cpuArchitecture := cluster.CPUArchitecture
+	if cpuArchitecture == common.AARCH64CPUArchitecture {
+		cpuArchitecture = common.ARM64CPUArchitecture
+	}
+
 	cacheKey := fmt.Sprintf("%s-%s", *majMinorVersion, cpuArchitecture)
 
 	if mustGatherVersions == nil {
@@ -110,11 +117,11 @@ func getMustGatherImages(
 		return versions, nil
 	}
 	//if not, fetch it from the release image and add it to the cache
-	releaseImage, err := getReleaseImage(context.Background(), openshiftVersion, cpuArchitecture, pullSecret)
+	releaseImage, err := getReleaseImage(context.Background(), cluster)
 	if err != nil {
 		return nil, err
 	}
-	ocpMustGatherImage, err := releaseHandler.GetMustGatherImage(log, *releaseImage.URL, releaseImageMirror, pullSecret)
+	ocpMustGatherImage, err := releaseHandler.GetMustGatherImage(log, *releaseImage.URL, releaseImageMirror, cluster.PullSecret)
 	if err != nil {
 		return nil, err
 	}
