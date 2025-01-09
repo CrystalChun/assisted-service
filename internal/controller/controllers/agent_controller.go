@@ -179,13 +179,6 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 		log.WithError(err).Warnf("failed to set infraEnv name label on agent %s/%s", agent.Namespace, agent.Name)
 	}
 
-	// Add/Update Agent annotations
-	if updateAnnotations(log, agent, &h.Host) {
-		if err = r.updateAndReplaceAgent(ctx, agent); err != nil {
-			log.WithError(err).Warnf("failed to set annotations on agent %s/%s", agent.Namespace, agent.Name)
-		}
-	}
-
 	if agent.Spec.ClusterDeploymentName == nil && h.ClusterID != nil {
 		log.Debugf("ClusterDeploymentName is unset in Agent %s. unbind", agent.Name)
 		return r.unbindHost(ctx, log, agent, origAgent, h)
@@ -243,12 +236,16 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 		return r.updateStatus(ctx, log, agent, origAgent, &h.Host, h.ClusterID, err, !IsUserError(err))
 	}
 
-	err = r.updateInventoryAndLabels(log, ctx, &h.Host, agent)
+	err = r.updateInventory(log, ctx, &h.Host, agent)
 	if err != nil {
 		return r.updateStatus(ctx, log, agent, origAgent, &h.Host, h.ClusterID, err, true)
 	}
 
 	err = r.updateNtpSources(log, &h.Host, agent)
+	if err != nil {
+		return r.updateStatus(ctx, log, agent, origAgent, &h.Host, h.ClusterID, err, true)
+	}
+	err = r.updateLabelsAndAnnotations(ctx, log, agent, &h.Host)
 	if err != nil {
 		return r.updateStatus(ctx, log, agent, origAgent, &h.Host, h.ClusterID, err, true)
 	}
@@ -1331,7 +1328,7 @@ func (r *AgentReconciler) updateNtpSources(log logrus.FieldLogger, host *models.
 	return nil
 }
 
-func (r *AgentReconciler) updateInventoryAndLabels(log logrus.FieldLogger, ctx context.Context, host *models.Host, agent *aiv1beta1.Agent) error {
+func (r *AgentReconciler) updateInventory(log logrus.FieldLogger, ctx context.Context, host *models.Host, agent *aiv1beta1.Agent) error {
 	if host.Inventory == "" {
 		log.Debugf("Skip update inventory: Host %s inventory not set", agent.Name)
 		return nil
@@ -1437,10 +1434,19 @@ func (r *AgentReconciler) updateInventoryAndLabels(log logrus.FieldLogger, ctx c
 		}
 	}
 
-	return r.updateLabels(log, ctx, agent)
+	return nil
 }
 
-func (r *AgentReconciler) updateLabels(log logrus.FieldLogger, ctx context.Context, agent *aiv1beta1.Agent) error {
+func (r *AgentReconciler) updateLabelsAndAnnotations(ctx context.Context, log logrus.FieldLogger, agent *aiv1beta1.Agent, host *models.Host) error {
+	changed := r.updateLabels(ctx, log, agent)
+	changed = updateAnnotations(log, agent, host) || changed
+	if changed {
+		return r.updateAndReplaceAgent(ctx, agent)
+	}
+	return nil
+}
+
+func (r *AgentReconciler) updateLabels(ctx context.Context, log logrus.FieldLogger, agent *aiv1beta1.Agent) bool {
 	inventory := agent.Status.Inventory
 	hasSSD := false
 	for _, d := range inventory.Disks {
@@ -1466,11 +1472,7 @@ func (r *AgentReconciler) updateLabels(log logrus.FieldLogger, ctx context.Conte
 	}
 	changed = setAgentLabel(log, agent, AgentLabelClusterDeploymentNamespace, namespace) || changed
 
-	if changed {
-		return r.updateAndReplaceAgent(ctx, agent)
-	}
-
-	return nil
+	return changed
 }
 
 func (r *AgentReconciler) updateAndReplaceAgent(ctx context.Context, agent *aiv1beta1.Agent) error {
