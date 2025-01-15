@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openshift/assisted-service/pkg/auth"
+	"github.com/openshift/assisted-service/pkg/mirrorregistries"
 	"github.com/openshift/assisted-service/pkg/ocm"
 	"github.com/pkg/errors"
 )
@@ -31,6 +32,16 @@ func ParsePublicRegistries(publicRegistries map[string]bool, publicRegistriesLit
 	}
 
 	for _, registry := range strings.Split(publicRegistriesLiteral, ",") {
+		publicRegistries[registry] = true
+	}
+}
+
+func ParseMirrorRegistries(publicRegistries map[string]bool, mirrorRegistries []mirrorregistries.RegistriesConf) {
+	for _, mirrorRegistry := range mirrorRegistries {
+		registry, err := ParseRegistry(mirrorRegistry.Location)
+		if err != nil {
+			continue
+		}
 		publicRegistries[registry] = true
 	}
 }
