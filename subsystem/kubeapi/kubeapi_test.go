@@ -1362,7 +1362,7 @@ location = "%s"
 				}
 
 				By("Using a clusterimageset referencing a mirrored release image from the mirror registry")
-				deployClusterImageSetCRD(ctx, kubeClient, exampleImageSetName, "registry.ci.openshift.org/origin/release:4.16")
+				deployClusterImageSetCRD(ctx, kubeClient, exampleImageSetName, "registry.ci.openshift.org/ocp/release:4.17.13")
 				aciSpec.ImageSetRef = &hivev1.ClusterImageSetReference{Name: exampleImageSetName}
 
 				By("Creating the cluster")
@@ -1379,6 +1379,10 @@ location = "%s"
 					hiveext.ClusterSyncedOkReason)
 			})
 			It("fails when missing a pull secret auth for a registry that's not mirrored", func() {
+				By("Using a clusterimageset referencing a release image that's not from the mirror registry")
+				deployClusterImageSetCRD(ctx, kubeClient, exampleImageSetName, "registry.ci.openshift.org/ocp/release:4.17.13")
+				aciSpec.ImageSetRef = &hivev1.ClusterImageSetReference{Name: exampleImageSetName}
+
 				By("Creating the cluster")
 				deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 				deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
@@ -1504,6 +1508,11 @@ location = "%s"
 			Expect(condition.Message).To(ContainSubstring("invalid pull secret data"))
 		})
 		It("fails when missng a pull secret auth for a registry", func() {
+			exampleImageSetName := "example-release-image"
+			By("Using a clusterimageset referencing a release image")
+			deployClusterImageSetCRD(ctx, kubeClient, exampleImageSetName, "registry.ci.openshift.org/ocp/release:4.17.13")
+			aciSpec.ImageSetRef = &hivev1.ClusterImageSetReference{Name: exampleImageSetName}
+
 			By("Creating the cluster")
 			deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 			deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
