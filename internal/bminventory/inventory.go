@@ -59,6 +59,7 @@ import (
 	"github.com/openshift/assisted-service/pkg/k8sclient"
 	"github.com/openshift/assisted-service/pkg/leader"
 	logutil "github.com/openshift/assisted-service/pkg/log"
+	"github.com/openshift/assisted-service/pkg/mirrorregistries"
 	"github.com/openshift/assisted-service/pkg/ocm"
 	"github.com/openshift/assisted-service/pkg/s3wrapper"
 	"github.com/openshift/assisted-service/pkg/staticnetworkconfig"
@@ -176,7 +177,7 @@ type InstallerInternals interface {
 	GetKnownHostApprovedCounts(clusterID strfmt.UUID) (registered, approved int, err error)
 	HostWithCollectedLogsExists(clusterId strfmt.UUID) (bool, error)
 	GetKnownApprovedHosts(clusterId strfmt.UUID) ([]*common.Host, error)
-	ValidatePullSecret(secret string, username string, releaseImageURL string) error
+	ValidatePullSecret(additionalIgnoredRegistries []string, secret string, username string, releaseImageURL string) error
 	GetInfraEnvInternal(ctx context.Context, params installer.GetInfraEnvParams) (*common.InfraEnv, error)
 	V2UpdateHostInstallProgressInternal(ctx context.Context, params installer.V2UpdateHostInstallProgressParams) error
 	CreateHostInKubeKeyNamespace(ctx context.Context, kubeKey types.NamespacedName, host *models.Host) error
@@ -288,8 +289,8 @@ func NewBareMetalInventory(
 	}
 }
 
-func (b *bareMetalInventory) ValidatePullSecret(secret string, username string, releaseImageURL string) error {
-	return b.secretValidator.ValidatePullSecret(secret, username, releaseImageURL)
+func (b *bareMetalInventory) ValidatePullSecret(additionalIgnoreRegistries []string, secret string, username string, releaseImageURL string) error {
+	return b.secretValidator.ValidatePullSecret(additionalIgnoreRegistries, secret, username, releaseImageURL)
 }
 
 func (b *bareMetalInventory) updatePullSecret(pullSecret string, log logrus.FieldLogger) (string, error) {
@@ -668,8 +669,14 @@ func (b *bareMetalInventory) RegisterClusterInternal(ctx context.Context, kubeKe
 		return nil, common.NewApiError(http.StatusBadRequest, err)
 	}
 
+	var mirroredRegistries []string
+	if mirrorRegistryConfiguration != nil {
+		mirroredRegistries = extractIgnorableRegistriesFromMirrorConfig(log, mirrorRegistryConfiguration)
+	}
+	b.log.Infof("CRYSTAL mirrored registries creating cluster %v", mirroredRegistries)
+
 	pullSecret := swag.StringValue(params.NewClusterParams.PullSecret)
-	err = b.ValidatePullSecret(pullSecret, ocm.UserNameFromContext(ctx), *releaseImage.URL)
+	err = b.ValidatePullSecret(mirroredRegistries, pullSecret, ocm.UserNameFromContext(ctx), *releaseImage.URL)
 	if err != nil {
 		err = errors.Wrap(secretValidationToUserError(err), "pull secret for new cluster is invalid")
 		return nil, common.NewApiError(http.StatusBadRequest, err)
@@ -716,6 +723,19 @@ func (b *bareMetalInventory) RegisterClusterInternal(ctx context.Context, kubeKe
 	b.metricApi.ClusterRegistered()
 	cluster, err = b.GetClusterInternal(ctx, installer.V2GetClusterParams{ClusterID: *cluster.ID})
 	return cluster, err
+}
+
+func extractIgnorableRegistriesFromMirrorConfig(log logrus.FieldLogger, mirrorRegistryConfig *common.MirrorRegistryConfiguration) []string {
+	var ignorableRegistries []string
+	mirroredRegistries, err := mirrorregistries.ExtractLocationMirrorDataFromRegistriesFromToml(mirrorRegistryConfig.RegistriesConf)
+	if err != nil {
+		log.WithError(err).Warnf("failed to extract location from saved cluster mirror registry configuration while updating cluster params")
+	}
+	for _, registry := range mirroredRegistries {
+		log.Infof("CRYSTAL adding registry to ignorable %s", registry)
+		ignorableRegistries = append(ignorableRegistries, registry.Location)
+	}
+	return ignorableRegistries
 }
 
 // Validates support level features incompatibilities and validates all active features implementing
@@ -1881,7 +1901,17 @@ func (b *bareMetalInventory) validateAndUpdateClusterParams(ctx context.Context,
 	log := logutil.FromContext(ctx, b.log)
 
 	if swag.StringValue(params.ClusterUpdateParams.PullSecret) != "" {
-		if err := b.ValidatePullSecret(*params.ClusterUpdateParams.PullSecret, ocm.UserNameFromContext(ctx), cluster.OcpReleaseImage); err != nil {
+		var ignorableRegistries []string
+		if cluster.MirrorRegistryConfiguration != "" {
+			mirrorRegistriesConfig, err := cluster.GetMirrorRegistryConfiguration()
+			if err != nil {
+				b.log.WithError(err).Warnf("failed to get saved cluster mirror registry configuration while updating cluster params")
+			} else {
+				ignorableRegistries = extractIgnorableRegistriesFromMirrorConfig(log, mirrorRegistriesConfig)
+			}
+		}
+		b.log.Infof("CRYSTAL mirrored registries updating cluster %v", ignorableRegistries)
+		if err := b.ValidatePullSecret(ignorableRegistries, *params.ClusterUpdateParams.PullSecret, ocm.UserNameFromContext(ctx), cluster.OcpReleaseImage); err != nil {
 			log.WithError(err).Errorf("Pull secret for cluster %s is invalid", params.ClusterID)
 			return installer.V2UpdateClusterParams{}, err
 		}
@@ -4869,7 +4899,7 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(ctx context.Context, kubeK
 		}
 
 		pullSecret := swag.StringValue(params.InfraenvCreateParams.PullSecret)
-		err = b.ValidatePullSecret(pullSecret, ocm.UserNameFromContext(ctx), "")
+		err = b.ValidatePullSecret(make([]string, 0), pullSecret, ocm.UserNameFromContext(ctx), "")
 		if err != nil {
 			err = errors.Wrap(secretValidationToUserError(err), "pull secret for new infraEnv is invalid")
 			return common.NewApiError(http.StatusBadRequest, err)
@@ -5324,7 +5354,7 @@ func (b *bareMetalInventory) validateAndUpdateInfraEnvParams(ctx context.Context
 	log := logutil.FromContext(ctx, b.log)
 
 	if params.InfraEnvUpdateParams.PullSecret != "" {
-		if err := b.ValidatePullSecret(params.InfraEnvUpdateParams.PullSecret, ocm.UserNameFromContext(ctx), ""); err != nil {
+		if err := b.ValidatePullSecret(make([]string, 0), params.InfraEnvUpdateParams.PullSecret, ocm.UserNameFromContext(ctx), ""); err != nil {
 			log.WithError(err).Errorf("Pull secret for infraEnv %s is invalid", params.InfraEnvID)
 			return installer.UpdateInfraEnvParams{}, err
 		}

@@ -10,6 +10,8 @@ import (
 	"github.com/openshift/assisted-service/pkg/mirrorregistries"
 	"github.com/openshift/assisted-service/pkg/ocm"
 	"github.com/pkg/errors"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -23,7 +25,7 @@ const (
 //
 //go:generate mockgen -source=pull_secret_validation.go -package=validations -destination=mock_pull_secret_validation.go
 type PullSecretValidator interface {
-	ValidatePullSecret(secret string, username string, releaseImageURL string) error
+	ValidatePullSecret(additionalIgnoredRegistries []string, secret string, username string, releaseImageURL string) error
 }
 
 func ParsePublicRegistries(publicRegistries map[string]bool, publicRegistriesLiteral string) {
@@ -202,11 +204,18 @@ func validateRegistryWithAuth(registry string, credentials map[string]PullSecret
 }
 
 // ValidatePullSecret validates that a pull secret is well formed and contains all required data
-func (v *registryPullSecretValidator) ValidatePullSecret(secret string, username string, releaseImageURL string) error {
+func (v *registryPullSecretValidator) ValidatePullSecret(additionalIgnoredRegistries []string, secret string, username string, releaseImageURL string) error {
 	creds, err := ParsePullSecret(secret)
 	if err != nil {
 		return err
 	}
+
+	ignorableRegistries := v.publicRegistries
+	for _, registry := range additionalIgnoredRegistries {
+		ignorableRegistries[registry] = true
+	}
+
+	logrus.Infof("CRYSTAL the creds for pull secret %s and releaseimage url %s\nall the public registries %+v", creds, releaseImageURL, ignorableRegistries)
 
 	// only check for cloud creds if we're authenticating against Red Hat SSO
 	if v.authHandler.AuthType() == auth.TypeRHSSO {
@@ -227,17 +236,20 @@ func (v *registryPullSecretValidator) ValidatePullSecret(secret string, username
 	}
 
 	for registry := range v.registriesWithAuth {
-		if err = validateRegistryWithAuth(registry, creds); err != nil {
-			return err
+		if !ignorableRegistries[registry] {
+			if err = validateRegistryWithAuth(registry, creds); err != nil {
+				return err
+			}
 		}
 	}
 
-	registryWithAuth, err := getRegistryAuthStatus(v.publicRegistries, releaseImageURL)
+	registryWithAuth, err := getRegistryAuthStatus(ignorableRegistries, releaseImageURL)
 	if err != nil {
 		return err
 	}
 
 	if registryWithAuth != nil {
+		logrus.Infof("CRYSTAL registries with auth is not nil")
 		if err := validateRegistryWithAuth(*registryWithAuth, creds); err != nil {
 			return err
 		}

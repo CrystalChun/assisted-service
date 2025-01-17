@@ -435,7 +435,11 @@ func addAnnotationToAgentClusterInstall(ctx context.Context, client k8sclient.Cl
 	}, "30s", "10s").Should(BeNil())
 }
 
-func deployClusterImageSetCRD(ctx context.Context, client k8sclient.Client, imageSetRef *hivev1.ClusterImageSetReference) {
+func deployClusterImageSetCRDByImageRef(ctx context.Context, client k8sclient.Client, imageSetRef *hivev1.ClusterImageSetReference) {
+	deployClusterImageSetCRD(ctx, client, imageSetRef.Name, imageSetsData[imageSetRef.Name])
+}
+
+func deployClusterImageSetCRD(ctx context.Context, client k8sclient.Client, name, img string) {
 	err := client.Create(ctx, &hivev1.ClusterImageSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ClusterImageSet",
@@ -443,10 +447,10 @@ func deployClusterImageSetCRD(ctx context.Context, client k8sclient.Client, imag
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: Options.Namespace,
-			Name:      imageSetRef.Name,
+			Name:      name,
 		},
 		Spec: hivev1.ClusterImageSetSpec{
-			ReleaseImage: imageSetsData[imageSetRef.Name],
+			ReleaseImage: img,
 		},
 	})
 	Expect(err).To(BeNil())
@@ -1190,7 +1194,7 @@ var _ = Describe("cluster installation", func() {
 		aciSpecExternalPlatform = getDefaultExternalPlatformAgentClusterInstallSpec(clusterDeploymentSpec.ClusterName)
 		aciSNOSpec = getDefaultSNOAgentClusterInstallSpec(clusterDeploymentSpec.ClusterName)
 		aciV6Spec = getDefaultAgentClusterIPv6InstallSpec(clusterDeploymentSpec.ClusterName)
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 
 		infraNsName = types.NamespacedName{
 			Name:      "infraenv" + randomNameSuffix(),
@@ -1233,15 +1237,21 @@ var _ = Describe("cluster installation", func() {
 			Expect(client.Create(ctx, registryCM)).ShouldNot(HaveOccurred())
 		}
 
-		getSecureRegistryToml := func() string {
+		getSecureRegistryToml := func(src, mirror string) string {
+			if src == "" {
+				src = sourceRegistry
+			}
+			if mirror == "" {
+				mirror = mirrorRegistry
+			}
 			return fmt.Sprintf(`
 [[registry]]
 location = "%s"
 [[registry.mirror]]
 location = "%s"
 `,
-				sourceRegistry,
-				mirrorRegistry,
+				src,
+				mirror,
 			)
 		}
 
@@ -1288,7 +1298,7 @@ location = "%s"
 						Namespace: Options.Namespace,
 					}
 
-					createUserMirrorRegistryConfigmap(kubeClient, getSecureRegistryToml(), mirrorRegistryCertificate)
+					createUserMirrorRegistryConfigmap(kubeClient, getSecureRegistryToml("", ""), mirrorRegistryCertificate)
 
 					clusterKey := types.NamespacedName{
 						Namespace: Options.Namespace,
@@ -1324,6 +1334,68 @@ location = "%s"
 					Expect(len(mirrorRegistryConf.ImageTagMirrors)).To(Equal(0))
 
 				})
+			})
+		})
+		Context("Pull secret validation", func() {
+			const exampleImageSetName = "example-release-image"
+			AfterEach(func() {
+				imageSet := hivev1.ClusterImageSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: exampleImageSetName,
+					},
+				}
+				Expect(kubeClient.Delete(ctx, &imageSet)).ShouldNot(HaveOccurred())
+				cm := corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      providedMirrorRegistryCMName,
+						Namespace: Options.Namespace,
+					},
+				}
+				Expect(kubeClient.Delete(ctx, &cm)).ShouldNot(HaveOccurred())
+			})
+			It("succeeds if the pull secret is missing an entry for a registry that's mirrored", func() {
+				By("Deploying a mirror registry configmap")
+				createUserMirrorRegistryConfigmap(kubeClient, getSecureRegistryToml("registry.ci.openshift.org", ""), mirrorRegistryCertificate)
+				aciSpec.MirrorRegistryRef = &hiveext.MirrorRegistryConfigMapReference{
+					Name:      providedMirrorRegistryCMName,
+					Namespace: Options.Namespace,
+				}
+
+				By("Using a clusterimageset referencing a mirrored release image from the mirror registry")
+				deployClusterImageSetCRD(ctx, kubeClient, exampleImageSetName, "registry.ci.openshift.org/origin/release:4.16")
+				aciSpec.ImageSetRef = &hivev1.ClusterImageSetReference{Name: exampleImageSetName}
+
+				By("Creating the cluster")
+				deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
+				deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
+
+				By("Verifying the conditions don't show an error for the pull secret")
+				installkey := types.NamespacedName{
+					Namespace: Options.Namespace,
+					Name:      clusterDeploymentSpec.ClusterInstallRef.Name,
+				}
+				checkAgentClusterInstallCondition(ctx, installkey,
+					hiveext.ClusterSpecSyncedCondition,
+					hiveext.ClusterSyncedOkReason)
+			})
+			It("fails when missing a pull secret auth for a registry that's not mirrored", func() {
+				By("Creating the cluster")
+				deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
+				deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
+				deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
+
+				By("Verifying conditions shows that the pull secret is missing authentication information")
+				installkey := types.NamespacedName{
+					Namespace: Options.Namespace,
+					Name:      clusterDeploymentSpec.ClusterInstallRef.Name,
+				}
+				checkAgentClusterInstallCondition(ctx, installkey,
+					hiveext.ClusterSpecSyncedCondition,
+					hiveext.ClusterBackendErrorReason)
+
+				condition := controllers.FindStatusCondition(getAgentClusterInstallCRD(ctx, kubeClient, installkey).Status.Conditions,
+					hiveext.ClusterSpecSyncedCondition)
+				Expect(condition.Message).To(ContainSubstring("must contain auth"))
 			})
 		})
 	})
@@ -1407,28 +1479,49 @@ location = "%s"
 		}, "1m", "20s").Should(BeTrue())
 	})
 
-	It("Pull Secret validation error", func() {
-		By("setting pull secret with wrong data")
-		updateSecret(ctx, kubeClient, utils_test.PullSecretName, map[string]string{
-			corev1.DockerConfigJsonKey: utils_test.WrongPullSecret})
+	Context("Pull secret validation", func() {
+		It("errors when set with the wrong pull secret data", func() {
+			By("setting pull secret with wrong data")
+			updateSecret(ctx, kubeClient, utils_test.PullSecretName, map[string]string{
+				corev1.DockerConfigJsonKey: utils_test.WrongPullSecret})
 
-		By("Create cluster")
-		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
-		deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
-		deployAgentClusterInstallCRD(ctx, kubeClient, aciSNOSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
+			By("Create cluster")
+			deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
+			deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
+			deployAgentClusterInstallCRD(ctx, kubeClient, aciSNOSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
 
-		By("verify conditions")
-		installkey := types.NamespacedName{
-			Namespace: Options.Namespace,
-			Name:      clusterDeploymentSpec.ClusterInstallRef.Name,
-		}
-		checkAgentClusterInstallCondition(ctx, installkey,
-			hiveext.ClusterSpecSyncedCondition,
-			hiveext.ClusterBackendErrorReason)
+			By("verify conditions")
+			installkey := types.NamespacedName{
+				Namespace: Options.Namespace,
+				Name:      clusterDeploymentSpec.ClusterInstallRef.Name,
+			}
+			checkAgentClusterInstallCondition(ctx, installkey,
+				hiveext.ClusterSpecSyncedCondition,
+				hiveext.ClusterBackendErrorReason)
 
-		condition := controllers.FindStatusCondition(getAgentClusterInstallCRD(ctx, kubeClient, installkey).Status.Conditions,
-			hiveext.ClusterSpecSyncedCondition)
-		Expect(condition.Message).To(ContainSubstring("invalid pull secret data"))
+			condition := controllers.FindStatusCondition(getAgentClusterInstallCRD(ctx, kubeClient, installkey).Status.Conditions,
+				hiveext.ClusterSpecSyncedCondition)
+			Expect(condition.Message).To(ContainSubstring("invalid pull secret data"))
+		})
+		It("fails when missng a pull secret auth for a registry", func() {
+			By("Creating the cluster")
+			deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
+			deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
+			deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
+
+			By("Verifying conditions shows that the pull secret is missing authentication information")
+			installkey := types.NamespacedName{
+				Namespace: Options.Namespace,
+				Name:      clusterDeploymentSpec.ClusterInstallRef.Name,
+			}
+			checkAgentClusterInstallCondition(ctx, installkey,
+				hiveext.ClusterSpecSyncedCondition,
+				hiveext.ClusterBackendErrorReason)
+
+			condition := controllers.FindStatusCondition(getAgentClusterInstallCRD(ctx, kubeClient, installkey).Status.Conditions,
+				hiveext.ClusterSpecSyncedCondition)
+			Expect(condition.Message).To(ContainSubstring("must contain auth"))
+		})
 	})
 
 	It("Verify NetworkType configuration with IPv6", func() {
@@ -1588,7 +1681,7 @@ location = "%s"
 			Name: "openshift-v4.11.0",
 		}
 		aciSpec.ImageSetRef = imageSetRef4_11
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 		deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
 
@@ -1710,7 +1803,7 @@ location = "%s"
 			Name: "openshift-v4.14.0",
 		}
 		aciSpecExternalPlatform.ImageSetRef = imageSetRef4_14
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpecExternalPlatform.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpecExternalPlatform.ImageSetRef)
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 		deployInfraEnvCRD(ctx, kubeClient, infraNsName.Name, infraEnvSpec)
 
@@ -2275,7 +2368,7 @@ location = "%s"
 			Name: "openshift-v4.10.0",
 		}
 		aciSpec.ImageSetRef = imageSetRef4_10
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 		deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
 
@@ -2297,7 +2390,7 @@ location = "%s"
 			Name: "openshift-v4.11.0-multi",
 		}
 		aciSpec.ImageSetRef = imageSetRef4_11
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 		deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
 
@@ -2956,7 +3049,7 @@ location = "%s"
 		//Note: arm is supported with user managed networking only
 		armImageSetRef := &hivev1.ClusterImageSetReference{Name: "openshift-v4.10.0-arm"}
 		aciSNOSpec.ImageSetRef = armImageSetRef
-		deployClusterImageSetCRD(ctx, kubeClient, armImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, armImageSetRef)
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 		deployAgentClusterInstallCRD(ctx, kubeClient, aciSNOSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
 
@@ -3404,7 +3497,7 @@ location = "%s"
 			Name: "openshift-v4.11.0",
 		}
 		aciSpec.ImageSetRef = imageSetRef4_11
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 		deployAgentClusterInstallCRD(ctx, kubeClient, aciSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
 		checkAgentClusterInstallCondition(ctx, installkey, hiveext.ClusterSpecSyncedCondition, hiveext.ClusterSyncedOkReason)
 
@@ -5059,7 +5152,7 @@ location = "%s"
 		checkAgentClusterInstallCondition(ctx, installkey, hiveext.ClusterSpecSyncedCondition, hiveext.ClusterBackendErrorReason)
 
 		// Create ClusterImageSet
-		deployClusterImageSetCRD(ctx, kubeClient, aciSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSpec.ImageSetRef)
 		checkAgentClusterInstallCondition(ctx, installkey, hiveext.ClusterSpecSyncedCondition, hiveext.ClusterSyncedOkReason)
 	})
 
@@ -5507,7 +5600,7 @@ spec:
 		clusterImageSetReference := hivev1.ClusterImageSetReference{
 			Name: "openshift-v4.18.0-ec.2",
 		}
-		deployClusterImageSetCRD(ctx, kubeClient, &clusterImageSetReference)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, &clusterImageSetReference)
 
 		By("Deploy cluster deployment")
 		deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
@@ -5842,7 +5935,7 @@ var _ = PDescribe("PreprovisioningImage reconcile flow", func() { // Disabled un
 			deployClusterDeploymentCRD(ctx, kubeClient, clusterDeploymentSpec)
 			snoSpec := getDefaultSNOAgentClusterInstallSpec(clusterDeploymentSpec.ClusterName)
 			deployAgentClusterInstallCRD(ctx, kubeClient, snoSpec, clusterDeploymentSpec.ClusterInstallRef.Name)
-			deployClusterImageSetCRD(ctx, kubeClient, snoSpec.ImageSetRef)
+			deployClusterImageSetCRDByImageRef(ctx, kubeClient, snoSpec.ImageSetRef)
 
 			infraNsName = types.NamespacedName{
 				Name:      "infraenv",
@@ -5960,7 +6053,7 @@ var _ = PDescribe("restore Host by Agent flow", func() { // Disabled until MGMT-
 		aciSNOSpec = getDefaultSNOAgentClusterInstallSpec(clusterDeploymentSpec.ClusterName)
 		infraEnvSpec = getDefaultInfraEnvSpec(secretRef, clusterDeploymentSpec)
 		agentSpec = getDefaultAgentSpec(clusterDeploymentSpec, models.HostRoleMaster)
-		deployClusterImageSetCRD(ctx, kubeClient, aciSNOSpec.ImageSetRef)
+		deployClusterImageSetCRDByImageRef(ctx, kubeClient, aciSNOSpec.ImageSetRef)
 
 		clusterNsName = types.NamespacedName{
 			Namespace: Options.Namespace,
