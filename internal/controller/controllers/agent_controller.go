@@ -1652,10 +1652,12 @@ func (r *AgentReconciler) updateIfNeeded(ctx context.Context, log logrus.FieldLo
 	}
 
 	if spec.Role != "" && spec.Role != internalHost.Role {
+		r.Log.Infof("ROLE update requested. Spec role %s, internal host role %s", spec.Role, internalHost.Role)
 		hostUpdate = true
 		role := string(spec.Role)
 		params.HostUpdateParams.HostRole = &role
 	}
+	r.Log.Infof("Spec role %s, internal host role %s", spec.Role, internalHost.Role)
 
 	if spec.InstallationDiskID != "" && spec.InstallationDiskID != internalHost.InstallationDiskID {
 		hostUpdate = true
@@ -1719,6 +1721,7 @@ func (r *AgentReconciler) updateIfNeeded(ctx context.Context, log logrus.FieldLo
 			models.HostStatusBinding,
 		}
 		if funk.ContainsString(hostStatusesBeforeInstallationOrUnbound, swag.StringValue(internalHost.Status)) {
+			r.Log.Infof("UPDATING HOST")
 			returnedHost, err = r.Installer.V2UpdateHostInternal(ctx, *params, bminventory.NonInteractive)
 
 			if err != nil {
@@ -1726,6 +1729,7 @@ func (r *AgentReconciler) updateIfNeeded(ctx context.Context, log logrus.FieldLo
 				return internalHost, err
 			}
 			log.Infof("Updated host parameters for agent %s %s", agent.Name, agent.Namespace)
+			r.Log.Infof("Spec role %s, internal host role %s, returned host role %s", spec.Role, internalHost.Role, returnedHost.Role)
 		}
 	}
 	if internalHost.Approved != spec.Approved {

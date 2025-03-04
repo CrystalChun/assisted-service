@@ -53,6 +53,7 @@ func (h *kubeAPIVersionsHandler) GetMustGatherImages(openshiftVersion, cpuArchit
 // it then fetches all cluster image sets, updates the cache with these image sets, and attempts the cache lookup again.
 func (h *kubeAPIVersionsHandler) GetReleaseImage(ctx context.Context, openshiftVersion, cpuArchitecture, pullSecret string) (*models.ReleaseImage, error) {
 	cpuArchitecture = common.NormalizeCPUArchitecture(cpuArchitecture)
+	h.log.Infof("GET release image for arch %s", cpuArchitecture)
 	image, err := h.getReleaseImageFromCache(openshiftVersion, cpuArchitecture)
 	if err == nil || h.kubeClient == nil {
 		return image, err
@@ -122,11 +123,17 @@ func (h *kubeAPIVersionsHandler) getReleaseImageFromCache(openshiftVersion, cpuA
 		// Empty implies default CPU architecture
 		cpuArchitecture = common.DefaultCPUArchitecture
 	}
+	h.log.Infof("All release images %+v", h.releaseImages)
+	for _, ri := range h.releaseImages {
+		h.log.Infof("release image arch %s , url %s ", swag.StringValue(ri.CPUArchitecture), *ri.URL)
+	}
 
 	// Filter Release images by specified CPU architecture.
 	exactCPUArchReleaseImages := funk.Filter(h.releaseImages, func(releaseImage *models.ReleaseImage) bool {
+		h.log.Infof("In find exact cpu arch, release image arch [%s] and cpu arch [%s]", swag.StringValue(releaseImage.CPUArchitecture), cpuArchitecture)
 		return swag.StringValue(releaseImage.CPUArchitecture) == cpuArchitecture
 	})
+	h.log.Infof("CRYSTAL exact cpu arch %v", exactCPUArchReleaseImages)
 
 	// Filter multi-arch Release images by containing the specified CPU architecture
 	multiArchReleaseImages := funk.Filter(h.releaseImages, func(releaseImage *models.ReleaseImage) bool {

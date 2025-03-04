@@ -1480,6 +1480,7 @@ func (b *bareMetalInventory) InstallSingleDay2HostInternal(ctx context.Context, 
 	if h, err = b.getHost(ctx, infraEnvId.String(), hostId.String()); err != nil {
 		return err
 	}
+	log.Infof("Install single day 2 before auto assign role host role %s and suggested %s", h.Role, h.SuggestedRole)
 
 	// auto select host roles if not selected yet.
 	err = b.db.Transaction(func(tx *gorm.DB) error {
@@ -1491,7 +1492,7 @@ func (b *bareMetalInventory) InstallSingleDay2HostInternal(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-
+	log.Infof("install single day 2 after autoassign host role %s and suggested %s", h.Role, h.SuggestedRole)
 	if err = b.hostApi.RefreshStatus(ctx, &h.Host, b.db); err != nil {
 		return err
 	}
@@ -1539,6 +1540,7 @@ func (b *bareMetalInventory) V2InstallHost(ctx context.Context, params installer
 		return common.GenerateErrorResponder(err)
 	}
 
+	log.Info("Day 2 host role %s", host.Role)
 	h = &host.Host
 	if h == nil {
 		log.WithError(err).Errorf("host %s not found", params.HostID)
@@ -1567,12 +1569,15 @@ func (b *bareMetalInventory) V2InstallHost(ctx context.Context, params installer
 		return common.GenerateErrorResponder(err)
 	}
 
+	log.Info("Day 2 host role after auto assign %s", h.Role)
+
 	err = b.hostApi.RefreshStatus(ctx, h, b.db)
 	if err != nil {
 		log.Errorf("Failed to refresh host %s", params.HostID)
 		return common.GenerateErrorResponder(err)
 	}
 
+	log.Info("Day 2 host role after refresh status %s", h.Role)
 	if swag.StringValue(h.Status) != models.HostStatusKnown {
 		return common.NewApiError(http.StatusConflict, fmt.Errorf("cannot install host in state %s after refresh", swag.StringValue(h.Status)))
 	}
@@ -5916,12 +5921,14 @@ func (b *bareMetalInventory) BindHostInternal(ctx context.Context, params instal
 		return nil, common.NewApiError(http.StatusConflict, err)
 	}
 
+	log.Infof("before binding to cluster but in binding, host role %s and suggested %s", host.Host.Role, host.Host.SuggestedRole)
 	if err = b.hostApi.BindHost(ctx, &host.Host, *params.BindHostParams.ClusterID, b.db); err != nil {
 		log.WithError(err).Errorf("Failed to bind host <%s> to cluster <%s>",
 			params.HostID, *params.BindHostParams.ClusterID)
 		return nil, common.NewApiError(http.StatusInternalServerError, err)
 	}
 
+	log.Infof("after binding to cluster but in binding, host role %s and suggested %s", host.Host.Role, host.Host.SuggestedRole)
 	if err = b.clusterApi.RefreshSchedulableMastersForcedTrue(ctx, *cluster.ID); err != nil {
 		log.WithError(err).Errorf("Failed to refresh SchedulableMastersForcedTrue while binding host <%s> to cluster <%s>", host.ID, host.ClusterID)
 		return nil, common.NewApiError(http.StatusInternalServerError, err)
