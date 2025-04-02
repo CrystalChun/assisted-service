@@ -1859,7 +1859,7 @@ var _ = Describe("agent reconcile", func() {
 		Expect(conditionsv1.FindStatusCondition(host.Status.Conditions, v1beta1.SpecSyncedCondition).Status).To(Equal(corev1.ConditionFalse))
 	})
 
-	It("Agent inventory status", func() {
+	It("CRYSTAL Agent inventory status", func() {
 		macAddress := "some MAC address"
 		hostId := strfmt.UUID(uuid.New().String())
 		infraEnvId := strfmt.UUID(uuid.New().String())
@@ -1944,6 +1944,51 @@ var _ = Describe("agent reconcile", func() {
 		result, err := hr.Reconcile(ctx, newHostRequest(host))
 		Expect(err).To(BeNil())
 		Expect(result).To(Equal(ctrl.Result{}))
+		By("updating the agent inventory")
+		inventory = models.Inventory{
+			CPU: &models.CPU{
+				Architecture: common.DefaultCPUArchitecture,
+				Flags:        []string{"vmx"},
+			},
+			SystemVendor: &models.SystemVendor{
+				Manufacturer: "Red Hat",
+				ProductName:  "-bad-label-name",
+				Virtual:      true,
+			},
+			Interfaces: []*models.Interface{
+				{
+					Name: "eth0",
+					IPV4Addresses: []string{
+						"9.8.7.6/24",
+					},
+					IPV6Addresses: []string{
+						"1001:db8::10/120",
+					},
+					MacAddress: macAddress,
+				},
+			},
+			Disks: []*models.Disk{
+				{Path: "/dev/sda", Bootable: true, DriveType: models.DriveTypeHDD},
+				{Path: "/dev/sdb", Bootable: false, DriveType: models.DriveTypeHDD},
+			},
+		}
+		inv, _ = json.Marshal(&inventory)
+		backEndCluster.Hosts[0].Inventory = string(inv)
+		fmt.Fprintf(GinkgoWriter, "agent inventory in status is %+v", agent.Status.Inventory.Interfaces)
+		mockInstallerInternal.EXPECT().GetClusterByKubeKey(gomock.Any()).Return(backEndCluster, nil).AnyTimes()
+		for i := 0; i < 1; i++ {
+			result, err := hr.Reconcile(ctx, newHostRequest(host))
+			Expect(err).To(BeNil())
+			Expect(result).To(Equal(ctrl.Result{}))
+		}
+		agent = &v1beta1.Agent{}
+
+		key = types.NamespacedName{
+			Namespace: testNamespace,
+			Name:      hostId.String(),
+		}
+		Expect(c.Get(ctx, key, agent)).To(BeNil())
+		fmt.Fprintf(GinkgoWriter, "agent inventory in status is %+v", agent.Status.Inventory.Interfaces)
 	})
 
 	It("Agent ntp sources, role, bootstrap status", func() {

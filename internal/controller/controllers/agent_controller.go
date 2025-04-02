@@ -182,9 +182,11 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 
 	// Add/Update Agent annotations
 	if updateAnnotations(log, agent, &h.Host) {
+		log.Infof("CRYSTAL Annotations on Agent needs updating, replacing agent, Current: %s", agent.ResourceVersion)
 		if err = r.updateAndReplaceAgent(ctx, agent); err != nil {
 			log.WithError(err).Warnf("failed to set annotations on agent %s/%s", agent.Namespace, agent.Name)
 		}
+		log.Infof("CRYSTAL Updated and got new agent %s", agent.ResourceVersion)
 	}
 
 	if agent.Spec.ClusterDeploymentName == nil && h.ClusterID != nil {
@@ -264,7 +266,7 @@ func updateAnnotations(log logrus.FieldLogger, agent *v1beta1.Agent, h *models.H
 	updated = setAgentAnnotation(log, agent, AgentInventoryAnnotation, h.Inventory) || updated
 	updated = setAgentAnnotation(log, agent, AgentValidationsInfoAnnotation, h.ValidationsInfo) || updated
 	if h.Progress != nil {
-		updated = setAgentAnnotation(log, agent, AgentCurrentStageAnnotation, string(h.Progress.CurrentStage))
+		updated = setAgentAnnotation(log, agent, AgentCurrentStageAnnotation, string(h.Progress.CurrentStage)) || updated
 	}
 	return updated
 }
@@ -816,7 +818,7 @@ func (r *AgentReconciler) applyDay2NodeLabels(ctx context.Context, log logrus.Fi
 // In case that an error has ocurred when trying to sync the Spec, the error (syncErr) is presented in SpecSyncedCondition.
 // Internal bool differentiate between backend server error (internal HTTP 5XX) and user input error (HTTP 4XXX)
 func (r *AgentReconciler) updateStatus(ctx context.Context, log logrus.FieldLogger, agent, origAgent *aiv1beta1.Agent, h *models.Host, clusterId *strfmt.UUID, syncErr error, internal bool) (ctrl.Result, error) {
-
+	log.Infof("CRYSTAL in update status current agent %s", agent.ResourceVersion)
 	var (
 		err                   error
 		shouldAutoApproveCSRs bool
@@ -923,6 +925,7 @@ func (r *AgentReconciler) updateStatus(ctx context.Context, log logrus.FieldLogg
 	}
 
 	if !reflect.DeepEqual(agent, origAgent) {
+		log.Infof("CRYSTAL running update status on agent %s", agent.ResourceVersion)
 		if updateErr := r.Status().Update(ctx, agent); updateErr != nil {
 			log.WithError(updateErr).Error("failed to update agent Status")
 			return ctrl.Result{Requeue: true}, nil
