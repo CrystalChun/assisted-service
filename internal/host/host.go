@@ -1016,6 +1016,7 @@ func (m *Manager) CancelInstallation(ctx context.Context, h *models.Host, reason
 		reason: reason,
 		db:     db,
 	})
+	m.log.WithError(err).Errorf("CANCEL INSTALL FAILED for host %s", h.ID)
 	if err != nil {
 		isFailed = true
 		return common.NewApiError(http.StatusConflict, err)

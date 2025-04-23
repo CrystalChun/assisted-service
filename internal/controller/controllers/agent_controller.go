@@ -188,7 +188,24 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 	}
 
 	if agent.Spec.ClusterDeploymentName == nil && h.ClusterID != nil {
-		log.Debugf("ClusterDeploymentName is unset in Agent %s. unbind", agent.Name)
+		log.Infof("ClusterDeploymentName is unset in Agent %s. unbind", agent.Name)
+		installingStatuses := []string{
+			models.HostStatusPreparingForInstallation,
+			models.HostStatusPreparingFailed,
+			models.HostStatusPreparingSuccessful,
+			models.HostStatusInstalling,
+			models.HostStatusInstallingInProgress,
+			models.HostStatusInstallingPendingUserAction,
+		}
+		if funk.ContainsString(installingStatuses, *h.Status) {
+			log.Infof("Host %s IN THE MIDDLE OF INSTALL\nSTATUS: %s, try to cancel", agent.Name, *h.Status)
+			newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
+			if err != nil {
+				log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
+				return ctrl.Result{}, err
+			}
+			h = newHost
+		}
 		return r.unbindHost(ctx, log, agent, origAgent, h)
 	}
 
@@ -686,6 +703,7 @@ func (r *AgentReconciler) runReclaimAgent(ctx context.Context, log logrus.FieldL
 
 func (r *AgentReconciler) unbindHost(ctx context.Context, log logrus.FieldLogger, agent, origAgent *aiv1beta1.Agent, h *common.Host) (ctrl.Result, error) {
 	var reclaim bool
+	log.Infof("In Agent controller unbind host %s", agent.Name)
 
 	// log and don't reclaim if anything fails here
 	cluster, err := r.Installer.GetClusterInternal(ctx, installer.V2GetClusterParams{ClusterID: *h.ClusterID})
@@ -696,6 +714,7 @@ func (r *AgentReconciler) unbindHost(ctx context.Context, log logrus.FieldLogger
 			log.Warnf("cluster %s missing kube key (%s/%s), not attempting reclaim", h.ClusterID, cluster.KubeKeyNamespace, cluster.KubeKeyName)
 		}
 	} else {
+		log.Infof("Cluster kube key is found, reclaiming host %s", agent.Name)
 		clusterRef := &aiv1beta1.ClusterReference{Namespace: cluster.KubeKeyNamespace, Name: cluster.KubeKeyName}
 		reclaim = r.shouldReclaimOnUnbind(ctx, origAgent)
 		if reclaim {
@@ -717,11 +736,13 @@ func (r *AgentReconciler) unbindHost(ctx context.Context, log logrus.FieldLogger
 		HostID:     *h.ID,
 		InfraEnvID: h.InfraEnvID,
 	}
+	log.Infof("Running unbind host internal")
 	host, err := r.Installer.UnbindHostInternal(ctx, params, reclaim, bminventory.NonInteractive)
 	if err != nil {
 		return r.updateStatus(ctx, log, agent, origAgent, &h.Host, nil, err, !IsUserError(err))
 	}
 
+	log.Infof("finished unbinding")
 	return r.updateStatus(ctx, log, agent, origAgent, &host.Host, h.ClusterID, nil, true)
 }
 

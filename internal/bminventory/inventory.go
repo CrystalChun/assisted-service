@@ -168,6 +168,7 @@ type InstallerInternals interface {
 	InstallSingleDay2HostInternal(ctx context.Context, clusterId strfmt.UUID, infraEnvId strfmt.UUID, hostId strfmt.UUID) error
 	UpdateClusterInstallConfigInternal(ctx context.Context, params installer.V2UpdateClusterInstallConfigParams) (*common.Cluster, error)
 	CancelInstallationInternal(ctx context.Context, params installer.V2CancelInstallationParams) (*common.Cluster, error)
+	CancelDay2HostInstallation(ctx context.Context, host *common.Host) (*common.Host, error)
 	TransformClusterToDay2Internal(ctx context.Context, clusterID strfmt.UUID) (*common.Cluster, error)
 	GetClusterSupportedPlatformsInternal(ctx context.Context, params installer.GetClusterSupportedPlatformsParams) (*[]models.PlatformType, error)
 	V2UpdateHostInternal(ctx context.Context, params installer.V2UpdateHostParams, interactivity Interactivity) (*common.Host, error)
@@ -4246,6 +4247,22 @@ func setInfraEnvPullSecret(infraEnv *common.InfraEnv, pullSecret string) {
 	} else {
 		infraEnv.PullSecretSet = false
 	}
+}
+
+func (b *bareMetalInventory) CancelDay2HostInstallation(ctx context.Context, host *common.Host) (*common.Host, error) {
+	err := b.db.Transaction(func(tx *gorm.DB) error {
+		cancelErr := b.hostApi.CancelInstallation(ctx, &host.Host, "Installation was cancelled by user", tx)
+		if cancelErr != nil {
+			b.log.WithError(cancelErr).Errorf("Failed to cancel day 2 install for host %s", host.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		b.log.WithError(err).Errorf("Failed to cancel day 2 install for host %s", host.ID)
+		return host, err
+	}
+	b.log.Info("Successfully canceled day 2 install for host %s", host.ID)
+	return host, nil
 }
 
 func (b *bareMetalInventory) CancelInstallationInternal(ctx context.Context, params installer.V2CancelInstallationParams) (*common.Cluster, error) {

@@ -174,16 +174,9 @@ func (a *AgentValidatingAdmissionHook) validateUpdate(admissionSpec *admissionv1
 			models.HostStatusInstallingPendingUserAction,
 		}
 		if funk.ContainsString(installingStatuses, newObject.Status.DebugInfo.State) {
-			message := "Attempted to change Spec.ClusterDeploymentName which is immutable during Agent installation."
-			contextLogger.Infof("Failed validation: %v", message)
-			contextLogger.Error(message)
-			return &admissionv1.AdmissionResponse{
-				Allowed: false,
-				Result: &metav1.Status{
-					Status: metav1.StatusFailure, Code: http.StatusBadRequest, Reason: metav1.StatusReasonBadRequest,
-					Message: message,
-				},
-			}
+			message := "Spec.ClusterDeploymentName changed during Agent installation."
+			contextLogger.Infof("%v", message)
+			// We might want to make sure that the cluster ref is empty...
 		}
 	}
 
