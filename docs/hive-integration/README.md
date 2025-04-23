@@ -305,6 +305,8 @@ In order to alter the default coreos-installer arguments used when running `core
 List of supported args can be found [here](https://github.com/openshift/assisted-service/blob/38a9d0398b96e81ef494029277e362a7256df44e/internal/host/hostutil/host_utils.go#L150)
 In case of failure to apply the overrides the agent conditions will reflect the error and show the relevant error message.
 
+#### ZTP (BMH)
+
 Add an annotation with the desired options, the bmac controller will update the agent spec with the annotation value.
 Then agent controller will forward it to host configuration.
 Note that this configuration must be applied prior to starting the installation
@@ -328,6 +330,18 @@ metadata:
   namespace: mynamespace
 spec:
 ```
+
+#### Boot it yourself (Agent CR)
+
+If you aren't using a BMH, use the Agent spec field to specify installer arguments
+
+```yaml
+apiVersion: agent-install.openshift.io/v1beta1
+kind: Agent
+spec:
+  installerArgs: '["--append-karg", "ip=192.0.2.2::192.0.2.254:255.255.255.0:core0.example.com:enp1s0:none", "--save-partindex", "1", "-n"]'
+```
+
 
 ### Creating host ignition config overrides
 

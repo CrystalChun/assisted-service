@@ -363,3 +363,9 @@ spec:
   pullSecretRef:
     name: pull-secret
 ```
+
+## Modifying Kernel Arguments for the Openshift Installer
+
+###
+
+### Kubernetes API

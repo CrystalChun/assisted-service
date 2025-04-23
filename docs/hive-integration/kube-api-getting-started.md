@@ -6,7 +6,9 @@ This document is a step-by-step guide that demonstrates how to deploy a single-n
 * This document is not meant to expand on each and every resource in detail; [other documents already do that](README.md). Instead, expect the details needed to understand the context and what is currently happening.
 
 * The order in which actions are performed here is **optional**, and you may choose to go by a different one. The one order restriction the API does have is in regards to creating `NMstateConfigs` (which are optional) before `InfraEnv`, for more details, [check the warning mentioned here](README.md#NMStateConfig).
+
 ## What To Expect
+
 * A walk through of custom resource definitions (CRDs) and understand how they relate to each other.
 
 * A clear understanding of what happened, both in OpenShift / Kubernetes and assisted-service backend per each action described below.
@@ -127,7 +129,7 @@ time="2021-06-28T20:45:07Z" level=info msg="AgentClusterInstall does not exist f
 time="2021-06-28T20:45:07Z" level=info msg="ClusterDeployment Reconcile ended" func="github.com/openshift/assisted-service/internal/controller/controllers.(*ClusterDeploymentsReconciler).Reconcile.func1" file="/go/src/github.com/openshift/origin/internal/controller/controllers/clusterdeployments_controller.go:112" cluster_deployment=single-node cluster_deployment_namespace=demo-worker4 go-id=684 request_id=b5022e40-4a1e-4658-ba0a-5159938b7789
 ```
 
-#### 2. Create [AgentClusterInstal](README.md#agentclusterinstall)
+#### 2. Create [AgentClusterInstall](README.md#agentclusterinstall)
 
 ```yaml
 cat <<EOF | kubectl create -f -
@@ -493,6 +495,7 @@ Having issues? try this [troubleshooting section](baremetal-agent-controller.md#
 ```
 
 ###### custom resource events:
+
 ```bash
 kubectl -n demo-worker4 describe baremetalhosts.metal3.io ostest-extraworker-4 | grep Events\: -A30
 ```
@@ -554,6 +557,7 @@ Expect to see an event that indicate the image download started:
     "severity": "info"
   }
 ```
+
 ### Agent Discovery and Installation
 * When the host boots from the discovery image, it gets registered to assisted-service. At first it will look like this:
 ```bash
