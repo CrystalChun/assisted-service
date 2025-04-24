@@ -205,6 +205,8 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 				return ctrl.Result{}, err
 			}
 			h = newHost
+			log.Info("cancelled install, requeueing")
+			return ctrl.Result{Requeue: true, RequeueAfter: 20 * time.Second}, nil
 		}
 		return r.unbindHost(ctx, log, agent, origAgent, h)
 	}
