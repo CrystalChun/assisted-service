@@ -173,10 +173,23 @@ func (a *AgentValidatingAdmissionHook) validateUpdate(admissionSpec *admissionv1
 			models.HostStatusInstallingInProgress,
 			models.HostStatusInstallingPendingUserAction,
 		}
+
 		if funk.ContainsString(installingStatuses, newObject.Status.DebugInfo.State) {
-			message := "Spec.ClusterDeploymentName changed during Agent installation."
-			contextLogger.Infof("%v", message)
-			// We might want to make sure that the cluster ref is empty...
+			if newObject.Spec.ClusterDeploymentName == nil {
+				message := "Spec.ClusterDeploymentName unset during Agent installation."
+				contextLogger.Infof("%v", message)
+				// We might want to make sure that the cluster ref is empty... and that the host is day2
+			} else {
+				message := "Spec.ClusterDeploymentName changed during Agent installation not allowed."
+				contextLogger.Errorf("%v", message)
+				return &admissionv1.AdmissionResponse{
+					Allowed: false,
+					Result: &metav1.Status{
+						Status: metav1.StatusFailure, Code: http.StatusBadRequest, Reason: metav1.StatusReasonBadRequest,
+						Message: message,
+					},
+				}
+			}
 		}
 	}
 

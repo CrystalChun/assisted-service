@@ -188,7 +188,7 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 	}
 
 	if agent.Spec.ClusterDeploymentName == nil && h.ClusterID != nil {
-		log.Infof("ClusterDeploymentName is unset in Agent %s. unbind", agent.Name)
+		log.Infof("ClusterDeploymentName is unset in Agent %s", agent.Name)
 		installingStatuses := []string{
 			models.HostStatusPreparingForInstallation,
 			models.HostStatusPreparingFailed,
@@ -198,17 +198,23 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 			models.HostStatusInstallingPendingUserAction,
 		}
 		if funk.ContainsString(installingStatuses, *h.Status) {
-			log.Infof("Host %s IN THE MIDDLE OF INSTALL\nSTATUS: %s, try to cancel", agent.Name, *h.Status)
-			newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
-			if err != nil {
-				log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
-				return ctrl.Result{}, err
+			if swag.StringValue(h.Kind) == models.HostKindAddToExistingClusterHost {
+				log.Infof("Day 2 Host %s IN THE MIDDLE OF INSTALL\nSTATUS: %s, try to cancel", agent.Name, *h.Status)
+				newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
+				if err != nil {
+					log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
+					return ctrl.Result{}, err
+				}
+				h = newHost
+				log.Info("cancelled install, requeueing")
+				return ctrl.Result{Requeue: true, RequeueAfter: 20 * time.Second}, nil
+			} else {
+				return ctrl.Result{}, fmt.Errorf("tried to unset ClusterDeployment from Agent in the middle of installation")
 			}
-			h = newHost
-			log.Info("cancelled install, requeueing")
-			return ctrl.Result{Requeue: true, RequeueAfter: 20 * time.Second}, nil
 		}
+		log.Info("unbind host")
 		return r.unbindHost(ctx, log, agent, origAgent, h)
+
 	}
 
 	if agent.Spec.ClusterDeploymentName != nil {
