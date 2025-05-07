@@ -199,22 +199,50 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 		}
 		if funk.ContainsString(installingStatuses, *h.Status) {
 			if swag.StringValue(h.Kind) == models.HostKindAddToExistingClusterHost {
-				log.Infof("Day 2 Host %s IN THE MIDDLE OF INSTALL\nSTATUS: %s, try to cancel", agent.Name, *h.Status)
-				newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
-				if err != nil {
-					log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
-					return ctrl.Result{}, err
+				switch h.Progress.CurrentStage {
+				case models.HostStageRebooting, models.HostStageJoined:
+					log.Infof("too late to cancel, Host stage %s", h.Progress.CurrentStage)
+					log.Infof("best effort to check if node is in cluster and try to remove it")
+
+					spokeClient, err := r.spokeKubeClient(ctx, agent.Spec.ClusterDeploymentName)
+					if err != nil {
+						r.Log.WithError(err).Errorf("Agent %s/%s: Failed to create spoke client", agent.Namespace, agent.Name)
+						return ctrl.Result{}, err
+					}
+					nodeName := getAgentHostname(agent)
+					if err := removeSpokeResources(ctx, log, spokeClient, nodeName); err != nil {
+						log.WithError(err).Errorf("failed to clean spoke cluster resources for node %s", nodeName)
+					} else {
+						log.Infof("node removed from spoke cluster")
+					}
+
+					log.Info("unbind host")
+					return r.unbindHost(ctx, log, agent, origAgent, h)
+				case models.HostStageWritingImageToDisk:
+					log.Infof("host %s is in stage %s, cancelling install and sending stop install cmd", agent.Name, h.Progress.CurrentStage)
+					log.Infof("Day 2 Host %s IN THE MIDDLE OF INSTALL\nSTATUS: %s, try to cancel", agent.Name, *h.Status)
+					newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
+					if err != nil {
+						log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
+						return ctrl.Result{}, err
+					}
+					h = newHost
+					log.Info("cancelled install, requeueing")
+				default:
+					log.Infof("host %s is in stage %s, nothing to do", agent.Name, h.Progress.CurrentStage)
 				}
-				h = newHost
-				log.Info("cancelled install, requeueing")
+
 				return ctrl.Result{Requeue: true, RequeueAfter: 20 * time.Second}, nil
 			} else {
 				return ctrl.Result{}, fmt.Errorf("tried to unset ClusterDeployment from Agent in the middle of installation")
 			}
 		}
+		if funk.ContainsString([]string{models.HostStatusCancelled, models.HostStatusError}, *h.Status) {
+			log.Infof("host still cancelling or cancelling failed: %s, requeueing", *h.Status)
+			return ctrl.Result{Requeue: true, RequeueAfter: 20 * time.Second}, nil
+		}
 		log.Info("unbind host")
 		return r.unbindHost(ctx, log, agent, origAgent, h)
-
 	}
 
 	if agent.Spec.ClusterDeploymentName != nil {

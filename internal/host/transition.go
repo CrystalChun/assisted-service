@@ -47,6 +47,7 @@ type TransitionHandler interface {
 	PostHostProgress(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
 	PostBindHost(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
 	PostCancelInstallation(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
+	PostCancelSuccess(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
 	PostHostInstallationFailed(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
 	PostHostMediaDisconnected(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
 	PostInstallHost(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error
@@ -363,6 +364,24 @@ func (th *transitionHandler) PostCancelInstallation(sw stateswitch.StateSwitch, 
 
 	return th.updateTransitionHost(params.ctx, logutil.FromContext(params.ctx, th.log), params.db, sHost,
 		params.reason)
+}
+
+type TransitionArgsCancelSuccess struct {
+	ctx context.Context
+	db  *gorm.DB
+}
+
+func (th *transitionHandler) PostCancelSuccess(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error {
+	sHost, ok := sw.(*stateHost)
+	if !ok {
+		return errors.New("PostCancelSuccess incompatible type of StateSwitch")
+	}
+	params, ok := args.(*TransitionArgsCancelSuccess)
+	if !ok {
+		return errors.New("PostCancelSuccess invalid argument")
+	}
+
+	return th.updateTransitionHost(params.ctx, logutil.FromContext(params.ctx, th.log), params.db, sHost, "")
 }
 
 ////////////////////////////////////////////////////////////////////////////

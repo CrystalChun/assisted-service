@@ -3704,6 +3704,12 @@ func (b *bareMetalInventory) updateDomainNameResolutionResponse(ctx context.Cont
 	}
 	return b.hostApi.UpdateDomainNameResolution(ctx, host, domainResolutionResponse, b.db)
 }
+func (b *bareMetalInventory) HandleStopInstallation(ctx context.Context, h *models.Host, responseJSON string) error {
+	log := logutil.FromContext(ctx, b.log)
+	log.Infof("stop reply response: %s for host %s", responseJSON, h.ID.String())
+	b.hostApi.HandleCancelSuccess(ctx, h, b.db)
+	return nil
+}
 
 func (b *bareMetalInventory) processUpgradeAgentResponse(ctx context.Context, h *models.Host,
 	responseJSON string) error {
@@ -3802,6 +3808,8 @@ func handleReplyByType(params installer.V2PostStepReplyParams, b *bareMetalInven
 		err = b.hostApi.HandleReclaimBootArtifactDownload(ctx, &host)
 	case models.StepTypeVerifyVips:
 		err = b.HandleVerifyVipsResponse(ctx, &host, stepReply)
+	case models.StepTypeStopInstallation:
+		err = b.HandleStopInstallation(ctx, &host, stepReply)
 	}
 	return err
 }

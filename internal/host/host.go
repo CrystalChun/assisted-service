@@ -82,6 +82,7 @@ type API interface {
 	UpdateTangConnectivityReport(ctx context.Context, h *models.Host, connectivityReport string) error
 	HostMonitoring()
 	CancelInstallation(ctx context.Context, h *models.Host, reason string, db *gorm.DB) *common.ApiErrorResponse
+	HandleCancelSuccess(ctx context.Context, h *models.Host, db *gorm.DB) *common.ApiErrorResponse
 	IsRequireUserActionReset(h *models.Host) bool
 	ResetHost(ctx context.Context, h *models.Host, reason string, db *gorm.DB) *common.ApiErrorResponse
 	ResetPendingUserAction(ctx context.Context, h *models.Host, db *gorm.DB) error
@@ -1016,9 +1017,21 @@ func (m *Manager) CancelInstallation(ctx context.Context, h *models.Host, reason
 		reason: reason,
 		db:     db,
 	})
-	m.log.WithError(err).Errorf("CANCEL INSTALL FAILED for host %s", h.ID)
 	if err != nil {
+		m.log.WithError(err).Errorf("CANCEL INSTALL FAILED for host %s", h.ID)
 		isFailed = true
+		return common.NewApiError(http.StatusConflict, err)
+	}
+	return nil
+}
+func (m *Manager) HandleCancelSuccess(ctx context.Context, h *models.Host, db *gorm.DB) *common.ApiErrorResponse {
+	m.log.Info("CRYSTAL handle cancel success")
+	err := m.sm.Run(TransitionTypeCancelSuccess, newStateHost(h), &TransitionArgsCancelSuccess{
+		ctx: ctx,
+		db:  db,
+	})
+	if err != nil {
+		m.log.WithError(err).Errorf("Transition cancel success FAILED for host %s", h.ID)
 		return common.NewApiError(http.StatusConflict, err)
 	}
 	return nil

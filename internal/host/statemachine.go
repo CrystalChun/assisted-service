@@ -12,6 +12,7 @@ const (
 	TransitionTypeRegisterHost               = "RegisterHost"
 	TransitionTypeHostInstallationFailed     = "HostInstallationFailed"
 	TransitionTypeCancelInstallation         = "CancelInstallation"
+	TransitionTypeCancelSuccess              = "CancelInstallationSuccess"
 	TransitionTypeInstallHost                = "InstallHost"
 	TransitionTypeResettingPendingUserAction = "ResettingPendingUserAction"
 	TransitionTypeRefresh                    = "RefreshHost"
@@ -376,6 +377,19 @@ func NewHostStateMachine(sm stateswitch.StateMachine, th TransitionHandler) stat
 	})
 
 	sm.AddTransitionRule(stateswitch.TransitionRule{
+		TransitionType: TransitionTypeCancelSuccess,
+		SourceStates: []stateswitch.State{
+			stateswitch.State(models.HostStatusCancelled),
+		},
+		DestinationState: stateswitch.State(models.HostStatusUnbindingPendingUserAction),
+		PostTransition:   th.PostCancelSuccess,
+		Documentation: stateswitch.TransitionRuleDoc{
+			Name:        "cancel success",
+			Description: "TODO: Document this transition rule",
+		},
+	})
+
+	sm.AddTransitionRule(stateswitch.TransitionRule{
 		TransitionType: TransitionTypeRebootingForReclaim,
 		SourceStates: []stateswitch.State{
 			stateswitch.State(models.HostStatusReclaiming),
@@ -402,6 +416,19 @@ func NewHostStateMachine(sm stateswitch.StateMachine, th TransitionHandler) stat
 		},
 	})
 
+	sm.AddTransitionRule(stateswitch.TransitionRule{
+		TransitionType: TransitionTypeRefresh,
+		SourceStates: []stateswitch.State{
+			stateswitch.State(models.HostStatusCancelled),
+		},
+		Condition:        th.HasStatusTimedOut(ReclaimTimeout),
+		DestinationState: stateswitch.State(models.HostStatusError),
+		PostTransition:   th.PostRefreshReclaimTimeout,
+		Documentation: stateswitch.TransitionRuleDoc{
+			Name:        "Refresh cancelling host",
+			Description: "TODO: Document this transition rule",
+		},
+	})
 	sm.AddTransitionRule(stateswitch.TransitionRule{
 		TransitionType: TransitionTypeRefresh,
 		SourceStates: []stateswitch.State{
@@ -1100,7 +1127,6 @@ func NewHostStateMachine(sm stateswitch.StateMachine, th TransitionHandler) stat
 	// Noop transitions
 	for _, state := range []stateswitch.State{
 		stateswitch.State(models.HostStatusError),
-		stateswitch.State(models.HostStatusCancelled),
 		stateswitch.State(models.HostStatusResetting),
 	} {
 		sm.AddTransitionRule(stateswitch.TransitionRule{
@@ -1132,6 +1158,21 @@ func NewHostStateMachine(sm stateswitch.StateMachine, th TransitionHandler) stat
 	for _, state := range []stateswitch.State{
 		stateswitch.State(models.HostStatusReclaiming),
 		stateswitch.State(models.HostStatusReclaimingRebooting),
+	} {
+		sm.AddTransitionRule(stateswitch.TransitionRule{
+			TransitionType:   TransitionTypeRefresh,
+			SourceStates:     []stateswitch.State{state},
+			Condition:        stateswitch.Not(th.HasStatusTimedOut(ReclaimTimeout)),
+			DestinationState: state,
+			Documentation: stateswitch.TransitionRuleDoc{
+				Name:        fmt.Sprintf("Refresh without timeout during %s should stay in %s", state, state),
+				Description: "TODO: Document this transition rule.",
+			},
+		})
+	}
+	// Noop transitions for refresh while cancelling has not timed out
+	for _, state := range []stateswitch.State{
+		stateswitch.State(models.HostStatusCancelled),
 	} {
 		sm.AddTransitionRule(stateswitch.TransitionRule{
 			TransitionType:   TransitionTypeRefresh,
