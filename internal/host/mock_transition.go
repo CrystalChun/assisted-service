@@ -227,6 +227,20 @@ func (mr *MockTransitionHandlerMockRecorder) PostCancelInstallation(sw, args int
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PostCancelInstallation", reflect.TypeOf((*MockTransitionHandler)(nil).PostCancelInstallation), sw, args)
 }
 
+// PostCancelSuccess mocks base method.
+func (m *MockTransitionHandler) PostCancelSuccess(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PostCancelSuccess", sw, args)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PostCancelSuccess indicates an expected call of PostCancelSuccess.
+func (mr *MockTransitionHandlerMockRecorder) PostCancelSuccess(sw, args interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PostCancelSuccess", reflect.TypeOf((*MockTransitionHandler)(nil).PostCancelSuccess), sw, args)
+}
+
 // PostHostInstallationFailed mocks base method.
 func (m *MockTransitionHandler) PostHostInstallationFailed(sw stateswitch.StateSwitch, args stateswitch.TransitionArgs) error {
 	m.ctrl.T.Helper()

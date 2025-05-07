@@ -187,6 +187,20 @@ func (mr *MockAPIMockRecorder) GetStagesByRole(arg0, arg1 interface{}) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStagesByRole", reflect.TypeOf((*MockAPI)(nil).GetStagesByRole), arg0, arg1)
 }
 
+// HandleCancelSuccess mocks base method.
+func (m *MockAPI) HandleCancelSuccess(arg0 context.Context, arg1 *models.Host, arg2 *gorm.DB) *common.ApiErrorResponse {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HandleCancelSuccess", arg0, arg1, arg2)
+	ret0, _ := ret[0].(*common.ApiErrorResponse)
+	return ret0
+}
+
+// HandleCancelSuccess indicates an expected call of HandleCancelSuccess.
+func (mr *MockAPIMockRecorder) HandleCancelSuccess(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HandleCancelSuccess", reflect.TypeOf((*MockAPI)(nil).HandleCancelSuccess), arg0, arg1, arg2)
+}
+
 // HandleInstallationFailure mocks base method.
 func (m *MockAPI) HandleInstallationFailure(arg0 context.Context, arg1 *models.Host) error {
 	m.ctrl.T.Helper()
