@@ -203,19 +203,31 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 				case models.HostStageRebooting, models.HostStageJoined:
 					log.Infof("too late to cancel, Host stage %s", h.Progress.CurrentStage)
 					log.Infof("best effort to check if node is in cluster and try to remove it")
-
-					spokeClient, err := r.spokeKubeClient(ctx, agent.Spec.ClusterDeploymentName)
-					if err != nil {
-						r.Log.WithError(err).Errorf("Agent %s/%s: Failed to create spoke client", agent.Namespace, agent.Name)
-						return ctrl.Result{}, err
-					}
-					nodeName := getAgentHostname(agent)
-					if err := removeSpokeResources(ctx, log, spokeClient, nodeName); err != nil {
-						log.WithError(err).Errorf("failed to clean spoke cluster resources for node %s", nodeName)
+					cluster, err := r.Installer.GetClusterInternal(ctx, installer.V2GetClusterParams{ClusterID: *h.ClusterID})
+					if err != nil || cluster.KubeKeyName == "" || cluster.KubeKeyNamespace == "" {
+						if err != nil {
+							log.WithError(err).Warnf("failed to get cluster %s, not attempting reclaim", h.ClusterID)
+						} else {
+							log.Warnf("cluster %s missing kube key (%s/%s), not attempting reclaim", h.ClusterID, cluster.KubeKeyNamespace, cluster.KubeKeyName)
+						}
 					} else {
-						log.Infof("node removed from spoke cluster")
+						clusterRef := &aiv1beta1.ClusterReference{
+							Name:      cluster.KubeKeyName,
+							Namespace: cluster.KubeKeyNamespace,
+						}
+						log.Infof("Cluster ref found %s", clusterRef)
+						spokeClient, err := r.spokeKubeClient(ctx, clusterRef)
+						if err != nil {
+							r.Log.WithError(err).Errorf("Agent %s/%s: Failed to create spoke client", agent.Namespace, agent.Name)
+							return ctrl.Result{}, err
+						}
+						nodeName := getAgentHostname(agent)
+						if err := removeSpokeResources(ctx, log, spokeClient, nodeName); err != nil {
+							log.WithError(err).Errorf("failed to clean spoke cluster resources for node %s", nodeName)
+						} else {
+							log.Infof("node removed from spoke cluster")
+						}
 					}
-
 					log.Info("unbind host")
 					return r.unbindHost(ctx, log, agent, origAgent, h)
 				case models.HostStageWritingImageToDisk:
