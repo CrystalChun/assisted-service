@@ -3814,6 +3814,21 @@ func handleReplyByType(params installer.V2PostStepReplyParams, b *bareMetalInven
 	return err
 }
 
+func (b *bareMetalInventory) HandleInstall(ctx context.Context, replyResponse int64, h *models.Host) middleware.Responder {
+	b.log.Infof("HANDLE INSTALL REPLY for host %s", h.ID)
+	if replyResponse == 0 && funk.ContainsString([]string{models.HostStatusCancelled}, *h.Status) {
+		b.log.Infof("Install successful but host cancelled, sending ")
+		steps, err := b.hostApi.GetNextSteps(ctx, h)
+		if err != nil {
+			b.log.WithError(err).Errorf("failed to get steps for host %s", h.ID.String())
+		}
+		b.log.Infof("sending steps %s", steps)
+
+		return installer.NewV2GetNextStepsOK().WithPayload(&steps)
+	}
+	return nil
+}
+
 func logReplyReceived(params installer.V2PostStepReplyParams, log logrus.FieldLogger, host *common.Host) {
 	if !shouldStepReplyBeLogged(params.Reply, host) {
 		return
@@ -5831,6 +5846,10 @@ func (b *bareMetalInventory) V2PostStepReply(ctx context.Context, params install
 			params.Reply.StepID, params.HostID, params.InfraEnvID)
 		return installer.NewV2PostStepReplyBadRequest().
 			WithPayload(common.GenerateError(http.StatusBadRequest, err))
+	}
+
+	if params.Reply.StepType == models.StepTypeInstall {
+		return b.HandleInstall(ctx, params.Reply.ExitCode, &host.Host)
 	}
 
 	err = handleReplyByType(params, b, ctx, host.Host, stepReply)
