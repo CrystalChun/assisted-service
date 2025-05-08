@@ -5848,7 +5848,8 @@ func (b *bareMetalInventory) V2PostStepReply(ctx context.Context, params install
 			WithPayload(common.GenerateError(http.StatusBadRequest, err))
 	}
 
-	if params.Reply.StepType == models.StepTypeInstall {
+	switch params.Reply.StepType {
+	case models.StepTypeInstall:
 		return b.HandleInstall(ctx, params.Reply.ExitCode, &host.Host)
 	}
 
@@ -5909,6 +5910,12 @@ func (b *bareMetalInventory) V2UpdateHostInstallProgressInternal(ctx context.Con
 	if host.ClusterID == nil {
 		err = fmt.Errorf("host %s is not bound to any cluster, cannot update progress", params.HostID)
 		log.WithError(err).Error()
+		return common.NewApiError(http.StatusBadRequest, err)
+	}
+
+	if funk.ContainsString([]string{models.HostStatusCancelled}, *host.Status) {
+		log.Info("HOST IS CANCELLED, not updating progress sending error")
+		err = fmt.Errorf("host %s is cancelled, cannot update progress", params.HostID)
 		return common.NewApiError(http.StatusBadRequest, err)
 	}
 
