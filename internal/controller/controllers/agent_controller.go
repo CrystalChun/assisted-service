@@ -226,6 +226,13 @@ func (r *AgentReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (
 							log.WithError(err).Errorf("failed to clean spoke cluster resources for node %s", nodeName)
 						} else {
 							log.Infof("node removed from spoke cluster")
+							newHost, err := r.Installer.CancelDay2HostInstallation(ctx, h)
+							if err != nil {
+								log.WithError(err).Errorf("FAILED CANCELLING INSTALLATION")
+								return ctrl.Result{}, err
+							}
+							h = newHost
+							log.Info("cancelled install")
 						}
 					}
 					log.Info("unbind host")
