@@ -318,7 +318,7 @@ func (r *BMACReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (c
 		return res.Result()
 	}
 
-	result = r.handleBMHDetachedAnnotation(log, bmh, agent)
+	result = r.handleBMHAnnotations(ctx, log, bmh, agent)
 	if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
 		return res.Result()
 	}
@@ -588,18 +588,42 @@ func (r *BMACReconciler) reconcileClusterReference(bmh *bmh_v1alpha1.BareMetalHo
 	return false, nil
 }
 
-func (r *BMACReconciler) handleBMHDetachedAnnotation(log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
+func (r *BMACReconciler) handleBMHAnnotations(ctx context.Context, log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
 	// ensure the paused and detached annotations do not exist if the host management annotation is set and the delete annotation is unset
-	if r.ConvergedFlowEnabled && !metav1.HasAnnotation(bmh.ObjectMeta, BMH_DELETE_ANNOTATION) &&
-		metav1.HasAnnotation(bmh.ObjectMeta, BMH_HOST_MANAGEMENT_ANNOTATION) {
-		// remove detached and paused if they exist
-		return reconcileComplete{dirty: removeBMHPausedAnnotation(log, bmh) || removeBMHDetachedAnnotation(log, bmh)}
+	if metav1.HasAnnotation(bmh.ObjectMeta, BMH_HOST_MANAGEMENT_ANNOTATION) {
+		if r.ConvergedFlowEnabled && !metav1.HasAnnotation(bmh.ObjectMeta, BMH_DELETE_ANNOTATION) {
+			// remove detached and paused if they exist
+			return reconcileComplete{dirty: removeBMHPausedAnnotation(log, bmh) || removeBMHDetachedAnnotation(log, bmh)}
+		}
+		return reconcileError{err: fmt.Errorf("failed to allow BMH host management for BMH %s/%s. Either converged flow is not enabled or the BMH has the annotation %s",
+			bmh.Name, bmh.Namespace, BMH_DELETE_ANNOTATION)}
 	}
 
 	// detach when provisioned for converged or anytime after reboot for non-converged
 	nonConvergedDetachStages := []models.HostStage{models.HostStageFailed, models.HostStageRebooting, models.HostStageJoined, models.HostStageDone}
-	if r.ConvergedFlowEnabled && bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned || funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
-		return r.ensureBMHDetached(log, bmh, agent)
+	if r.ConvergedFlowEnabled && bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned ||
+		!r.ConvergedFlowEnabled && funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
+		result := r.ensureBMHDetached(log, bmh, agent)
+		if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
+			return res
+		}
+	}
+
+	if r.PauseProvisionedBMHs {
+		// Add 'status' and 'paused' annotations for provisioned BMHs
+		if bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned {
+			result := r.addBMHStatusAndPausedAnnotations(log, bmh)
+			if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
+				return res
+			}
+		}
+		// Remove 'paused' annotation if BMH's provisioning state is missing
+		if bmh.Status.Provisioning.State == bmh_v1alpha1.StateNone {
+			result := r.removePausedAnnotation(log, bmh)
+			if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
+				return res
+			}
+		}
 	}
 
 	return reconcileComplete{}
@@ -919,39 +943,17 @@ func (r *BMACReconciler) reconcileBMH(ctx context.Context, log logrus.FieldLogge
 		return reconcileComplete{stop: true}
 	}
 
-	if r.PauseProvisionedBMHs {
-		// Add 'status' and 'paused' annotations for provisioned BMHs
-		if bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned && !metav1.HasAnnotation(bmh.ObjectMeta, BMH_HOST_MANAGEMENT_ANNOTATION) {
-			result := r.addBMHStatusAndPausedAnnotations(log, bmh)
-			if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
-				return res
-			}
-		}
-		// Remove 'paused' annotation if BMH's provisioning state is missing
-		if bmh.Status.Provisioning.State == bmh_v1alpha1.StateNone || metav1.HasAnnotation(bmh.ObjectMeta, BMH_HOST_MANAGEMENT_ANNOTATION) {
-			result := r.removePausedAnnotation(log, bmh)
-			if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
-				return res
-			}
-		}
-	}
-
 	// A detached BMH is considered to be unmanaged by the hub
 	// cluster and, therefore, BMAC reconciles on this BMH should
 	// not happen.
 	//
 	// User is expected to remove the `detached` annotation manually
 	// to bring this BMH back into the pool of reconciled BMH resources.
-	bmhAnnotations := bmh.ObjectMeta.GetAnnotations()
-	if _, ok := bmhAnnotations[BMH_DETACHED_ANNOTATION]; ok {
-		result := r.ensureBMHDetached(log, bmh, agent)
-		if !result.Stop(ctx) {
-			// only create a new result here if ensureBMHDetected had no changes and no errors
-			// this ensures that the reconcile call will still exit
-			result = reconcileComplete{stop: true}
-		}
+	if metav1.HasAnnotation(bmh.ObjectMeta, BMH_DETACHED_ANNOTATION) {
+		// If a user has BMH_HOST_MANAGEMENT_ANNOTATION on, detached will not be here and BMAC will continue reconciling
+		// this may not be an issue, but just an FYI
 		log.Debugf("Stopped BMH reconcile because it has been detached")
-		return result
+		return reconcileComplete{stop: true}
 	}
 
 	dirty := false
