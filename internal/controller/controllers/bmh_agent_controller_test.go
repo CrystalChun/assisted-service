@@ -1410,11 +1410,8 @@ var _ = Describe("bmac reconcile", func() {
 
 			})
 			It("should create spoke BMH for day 2 host with worker role when it's installing - happy flow", func() {
-
 				agent_day2.Status.DebugInfo.State = models.HostStatusInstalling
 				agent_day2.Status.Progress.CurrentStage = models.HostStageJoined
-				Expect(c.Update(ctx, agent_day2)).To(BeNil())
-
 				configMap := &corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "root-ca",

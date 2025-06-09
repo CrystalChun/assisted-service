@@ -277,11 +277,12 @@ func (r *BMACReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (c
 			return res.Result()
 		}
 	}
-
 	result = r.reconcileBMH(ctx, log, bmh, agent, infraEnv)
 	if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
 		return res.Result()
 	}
+
+	annotationResults := r.handleBMHAnnotations(ctx, log, bmh, agent)
 
 	// handle multiple agents matching the
 	// same BMH's Mac Address
@@ -312,17 +313,14 @@ func (r *BMACReconciler) Reconcile(origCtx context.Context, req ctrl.Request) (c
 		return res.Result()
 	}
 
-	result = r.reconcileDay2SpokeBMH(ctx, log, bmh, agent)
-	//TODO: is this correct?
+	result = r.reconcileSpokeBMH(ctx, log, bmh, agent)
 	if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
 		return res.Result()
 	}
 
-	result = r.handleBMHAnnotations(ctx, log, bmh, agent)
-	if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
+	if res := r.handleReconcileResult(ctx, log, annotationResults, bmh); res != nil {
 		return res.Result()
 	}
-
 	return result.Result()
 }
 
@@ -602,7 +600,7 @@ func (r *BMACReconciler) handleBMHAnnotations(ctx context.Context, log logrus.Fi
 	// detach when provisioned for converged or anytime after reboot for non-converged
 	nonConvergedDetachStages := []models.HostStage{models.HostStageFailed, models.HostStageRebooting, models.HostStageJoined, models.HostStageDone}
 	if r.ConvergedFlowEnabled && bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned ||
-		!r.ConvergedFlowEnabled && funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
+		!r.ConvergedFlowEnabled && agent != nil && funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
 		result := r.ensureBMHDetached(log, bmh, agent)
 		if res := r.handleReconcileResult(ctx, log, result, bmh); res != nil {
 			return res
@@ -686,7 +684,10 @@ func (r *BMACReconciler) ensureBMHDetached(log logrus.FieldLogger, bmh *bmh_v1al
 // while the latter will continue to update the status.
 func (r *BMACReconciler) reconcileAgentInventory(log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
 	log.Debugf("Started agent inventory reconcile")
-
+	if agent == nil {
+		log.Debug("Skipping  Agent Inventory (hardwaredetails) reconcile since agent does not exist yet")
+		return reconcileComplete{}
+	}
 	// This check should be updated. We should check the agent's conditions instead
 	if len(agent.Status.Inventory.Interfaces) == 0 {
 		log.Debugf("Skipping Agent Inventory (hardwaredetails) reconcile \n %v", agent)
@@ -1028,18 +1029,18 @@ func (r *BMACReconciler) reconcileBMH(ctx context.Context, log logrus.FieldLogge
 //
 // Baremetal-operator in the hub cluster creates a host using the live-iso feature. To add this host as a node
 // to an existing spoke cluster, the following things need to be done:
-// - Check cluster deployment to see if day2 flow needs to be triggered.
+// - Check cluster deployment to see if it's already installed.
 // - Get the kubeconfig client from secret data
 // - Creates a new Machine
 // - Create BMH with externallyProvisioned set to true and set the newly created machine as ConsumerRef
 // BMH_HARDWARE_DETAILS_ANNOTATION is needed for auto approval of the CSR.
-func (r *BMACReconciler) reconcileDay2SpokeBMH(ctx context.Context, log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
+func (r *BMACReconciler) reconcileSpokeBMH(ctx context.Context, log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
 	cd, installed, err := r.getClusterDeploymentAndCheckIfInstalled(ctx, log, agent)
-	if err != nil {
+	if err != nil && !k8serrors.IsNotFound(err) {
 		return reconcileError{err: err}
 	}
 	if !installed {
-		log.Infof("Skipping spoke BareMetalHost reconcile for agent %s/%s since it's not day2.", agent.Name, agent.Namespace)
+		log.Info("Skipping spoke BareMetalHost reconcile for agent since cluster is not yet installed.")
 		return reconcileComplete{}
 	}
 
@@ -1098,7 +1099,7 @@ func (r *BMACReconciler) reconcileDay2SpokeBMH(ctx context.Context, log logrus.F
 	if err != nil {
 		log.WithError(err).Errorf("failed to get checksum and url value from master spoke machine")
 		if stopReconcileLoop {
-			log.Info("Stopping reconcileDay2SpokeBMH")
+			log.Info("Stopping reconcileSpokeBMH")
 			return reconcileComplete{dirty: false, stop: stopReconcileLoop}
 		}
 		return reconcileError{err: err}
@@ -1686,6 +1687,10 @@ func (r *BMACReconciler) formatMCSCertificateIgnition(mcsCert string) (string, e
 }
 
 func (r *BMACReconciler) getClusterDeploymentAndCheckIfInstalled(ctx context.Context, log logrus.FieldLogger, agent *aiv1beta1.Agent) (*hivev1.ClusterDeployment, bool, error) {
+	if agent == nil {
+		log.Debugf("Agent does not exist yet")
+		return nil, false, nil
+	}
 	if agent.Spec.ClusterDeploymentName == nil {
 		log.Debugf("Agent is not bound yet")
 		return nil, false, nil
