@@ -1457,7 +1457,7 @@ location = "%s"
 			utils_test.TestContext.GenerateDomainResolution(ctx, h, clusterDeploymentSpec.ClusterName, "hive.example.com")
 		}
 
-		By("verify validations are successfull")
+		By("verify validations are successful")
 		installkey := types.NamespacedName{
 			Namespace: Options.Namespace,
 			Name:      clusterDeploymentSpec.ClusterInstallRef.Name,

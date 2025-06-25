@@ -4767,7 +4767,7 @@ definitions:
         x-go-custom-tag: gorm:"type:text"
         type: string
         description: |-
-          A comma-seperated list of host disks that the service will avoid
+          A comma-separated list of host disks that the service will avoid
           formatting.
   installer-args-params:
     type: object

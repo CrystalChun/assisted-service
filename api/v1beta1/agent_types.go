@@ -268,7 +268,7 @@ type AgentStatus struct {
 }
 
 type DebugInfo struct {
-	// EventsURL specifies an HTTP/S URL that contains events which occured during the cluster installation process
+	// EventsURL specifies an HTTP/S URL that contains events which occurred during the cluster installation process
 	// +optional
 	EventsURL string `json:"eventsURL,omitempty"`
 	// LogsURL specifies a url for download controller logs tar file.

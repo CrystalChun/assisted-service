@@ -1270,7 +1270,7 @@ func ignitionReadFile(ignition *ignition_types.Config, path string) ([]byte, err
 			}
 
 			if contentSourceURL.Scheme != "data" {
-				return nil, fmt.Errorf("scheme %s unsuported, only the data scheme is supported",
+				return nil, fmt.Errorf("scheme %s unsupported, only the data scheme is supported",
 					contentSourceURL.Scheme)
 			}
 

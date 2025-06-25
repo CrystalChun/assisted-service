@@ -61,7 +61,7 @@ Each of these files contains an area where the kernel arguments can be
 embedded. This can be identified by the regex **"(\n#+) COREOS_KARG_EMBED_AREA"**.
 The arguments should overwrite this are from the beginning and should
 not pass the last # (hash sign). The added kernel will be injected in the beginning.
-These arguments will be seperated by space **(" ")**.  When embedding the kernel arguments,
+These arguments will be separated by space **(" ")**.  When embedding the kernel arguments,
 the size of the above files will not change.
 
 Starting from version 4.10, there is a file that contains the file names,

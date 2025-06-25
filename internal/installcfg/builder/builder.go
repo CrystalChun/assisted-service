@@ -330,7 +330,7 @@ func (i *installConfigBuilder) getHypethreadingConfiguration(cluster *common.Clu
 	return "Disabled"
 }
 
-// mergeAllCASources merges all the CA sources into a single string, seperated
+// mergeAllCASources merges all the CA sources into a single string, separated
 // by newlines. CA sources include:
 // - The Red Hat root CA (used during the product's CI tests),
 // - User configured mirror registry CAs

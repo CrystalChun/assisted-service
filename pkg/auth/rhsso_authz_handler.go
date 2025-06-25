@@ -121,7 +121,7 @@ func (a *AuthzHandler) hasOwnerAccess(id string, obj interface{}, payload *ocm.A
 		return a.isObjectOwnedByOrg(id, obj, payload)
 	}
 
-	//in case error occured before, return it
+	//in case error occurred before, return it
 	return
 }
 

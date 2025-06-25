@@ -8231,7 +8231,7 @@ func init() {
           "$ref": "#/definitions/host-role"
         },
         "skip_formatting_disks": {
-          "description": "A comma-seperated list of host disks that the service will avoid\nformatting.",
+          "description": "A comma-separated list of host disks that the service will avoid\nformatting.",
           "type": "string",
           "x-go-custom-tag": "gorm:\"type:text\""
         },
@@ -19336,7 +19336,7 @@ func init() {
           "$ref": "#/definitions/host-role"
         },
         "skip_formatting_disks": {
-          "description": "A comma-seperated list of host disks that the service will avoid\nformatting.",
+          "description": "A comma-separated list of host disks that the service will avoid\nformatting.",
           "type": "string",
           "x-go-custom-tag": "gorm:\"type:text\""
         },

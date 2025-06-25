@@ -19,7 +19,7 @@ To deploy assisted-service and its components, run:
 make deploy-on-k8s
 ```
 
-With `minikube` You could use `minikube service assisted-installer-ui -n <namespace> --url` to expose the UI for external access. Run it in a seperate terminal. With `kind` it is exposed aoutomatically, you can access it in `http://127.0.0.1:8060`
+With `minikube` You could use `minikube service assisted-installer-ui -n <namespace> --url` to expose the UI for external access. Run it in a separate terminal. With `kind` it is exposed automatically, you can access it in `http://127.0.0.1:8060`
 
 **Note** - The scripts exist in this repository for `minikube` deployment still doesn't support complete installation or remote deployment. If you want to deploy assisted service on `k8s` to perform a complete installation or on remote server, consider using `kind` or using [assisted-test-infra](https://github.com/openshift/assisted-test-infra) scripts which can deploy assisted service on `minikube` to perform complete installation.
 

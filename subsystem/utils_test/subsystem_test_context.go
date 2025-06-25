@@ -861,7 +861,7 @@ func (t *SubsystemTestContext) DeregisterResources() {
 	}
 
 	if multiErr.ErrorOrNil() != nil {
-		t.log.WithError(err).Error("At-least one error occured during deregister cleanup")
+		t.log.WithError(err).Error("At-least one error occurred during deregister cleanup")
 	}
 }
 

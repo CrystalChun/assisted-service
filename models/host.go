@@ -155,7 +155,7 @@ type Host struct {
 	// role
 	Role HostRole `json:"role,omitempty"`
 
-	// A comma-seperated list of host disks that the service will avoid
+	// A comma-separated list of host disks that the service will avoid
 	// formatting.
 	SkipFormattingDisks string `json:"skip_formatting_disks,omitempty" gorm:"type:text"`
 

@@ -123,7 +123,7 @@ This should be achievable in a single write and should mitigate the transactiona
 	
 ### Consumers of the object store API will need to change, to consume the metdata and use it
 
-	Calls to `objectHandler.Download` and `objectHandler.UploadFile` and `objectHandler.UploadStream` will need to change to accomodate the metadata,
+	Calls to `objectHandler.Download` and `objectHandler.UploadFile` and `objectHandler.UploadStream` will need to change to accommodate the metadata,
 	the metadata itself may be ignored in many cases if not required.
 
 	For manifests, we will need to use metadata to implement.
