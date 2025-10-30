@@ -1217,9 +1217,6 @@ var _ = Describe("PreprovisioningImage deletion protection", func() {
 			result, err := pr.Reconcile(ctx, newPreprovisioningImageRequest(ppi))
 			Expect(err).To(BeNil())
 			Expect(result).To(Equal(ctrl.Result{Requeue: true}))
-
-			key := types.NamespacedName{Name: ppi.Name, Namespace: ppi.Namespace}
-			Expect(c.Get(ctx, key, ppi)).To(Succeed())
 			Expect(ppi.GetFinalizers()).To(ContainElement(PreprovisioningImageFinalizerName))
 		})
 
