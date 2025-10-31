@@ -29,6 +29,7 @@ import (
 
 	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
+	metal3_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/openshift/assisted-service/internal/bminventory"
 	"github.com/openshift/assisted-service/internal/common"
@@ -143,6 +144,11 @@ func (r *InfraEnvReconciler) handleInfraEnvDeletion(ctx context.Context, log log
 	if !funk.ContainsString(infraEnv.GetFinalizers(), InfraEnvFinalizerName) {
 		// Stop reconciliation as the item is being deleted
 		return ctrl.Result{}, nil
+	}
+	err := r.preprovisioningImagesStillExist(ctx, log, infraEnv)
+	if err != nil {
+		log.WithError(err).Warnf("preprovisioning images still exist for infraenv %s/%s, not removing finalizer yet", infraEnv.Namespace, infraEnv.Name)
+		return ctrl.Result{RequeueAfter: longerRequeueAfterOnError}, err
 	}
 	// deletion finalizer found, deregister the backend hosts and the infraenv
 	cleanUpErr := r.deregisterInfraEnvWithHosts(ctx, log, client.ObjectKeyFromObject(infraEnv))
@@ -566,6 +572,18 @@ func (r *InfraEnvReconciler) deregisterInfraEnvIfNeeded(ctx context.Context, log
 	log.Infof("InfraEnv resource deleted : %s", infraEnv.ID)
 
 	return buildReply(nil)
+}
+
+func (r *InfraEnvReconciler) preprovisioningImagesStillExist(ctx context.Context, log logrus.FieldLogger, infraEnv *aiv1beta1.InfraEnv) error {
+	preprovisioningImages := metal3_v1alpha1.PreprovisioningImageList{}
+	err := r.Client.List(ctx, &preprovisioningImages, client.InNamespace(infraEnv.Namespace), client.MatchingLabels{InfraEnvLabel: infraEnv.Name})
+	if err != nil {
+		return err
+	}
+	if len(preprovisioningImages.Items) > 0 {
+		return fmt.Errorf("%d preprovisioning images still exist for infraenv %s/%s", len(preprovisioningImages.Items), infraEnv.Namespace, infraEnv.Name)
+	}
+	return nil
 }
 
 func (r *InfraEnvReconciler) deregisterInfraEnvWithHosts(ctx context.Context, log logrus.FieldLogger, key types.NamespacedName) error {
