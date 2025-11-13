@@ -5027,6 +5027,8 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(ctx context.Context, kubeK
 			kernelArguments = swag.String(string(b))
 		}
 
+		log.Infof("openshiftVersion: %s", openshiftVersion)
+
 		infraEnv = common.InfraEnv{
 			Generated: false,
 			InfraEnv: models.InfraEnv{
@@ -5083,12 +5085,14 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(ctx context.Context, kubeK
 			err = errors.Wrap(secretValidationToUserError(err), "pull secret for new infraEnv is invalid")
 			return common.NewApiError(http.StatusBadRequest, err)
 		}
+		log.Infof("pullSecret: %s", pullSecret)
 		var ps string
 		ps, err = b.updatePullSecret(pullSecret, log)
 		if err != nil {
 			return common.NewApiError(http.StatusBadRequest,
 				errors.New("Failed to update Pull-secret with additional credentials"))
 		}
+		log.Infof("ps: %s", ps)
 		setInfraEnvPullSecret(&infraEnv, ps)
 
 		if err = updateSSHAuthorizedKey(&infraEnv); err != nil {
@@ -5465,6 +5469,7 @@ func (b *bareMetalInventory) validateDiscoveryIgnitionImageSize(ctx context.Cont
 }
 
 func (b *bareMetalInventory) updateInfraEnvData(infraEnv *common.InfraEnv, params installer.UpdateInfraEnvParams, internalIgnitionConfig *string, db *gorm.DB, log logrus.FieldLogger) error {
+	log.Infof("updateInfraEnvData: %+v", params)
 	updates := map[string]interface{}{}
 	if err := b.updateInfraEnvProxy(params, infraEnv, updates); err != nil {
 		return err
@@ -5529,6 +5534,7 @@ func (b *bareMetalInventory) updateInfraEnvData(infraEnv *common.InfraEnv, param
 		updates["internal_ignition_config_override"] = internalIgnitionConfig
 	}
 
+	log.Infof("updates: %+v", updates)
 	if len(updates) > 0 {
 		updates["generated"] = false
 		dbReply := db.Model(&common.InfraEnv{}).Where("id = ?", infraEnv.ID.String()).Updates(updates)

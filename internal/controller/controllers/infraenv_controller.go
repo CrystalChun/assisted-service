@@ -716,6 +716,7 @@ func (r *InfraEnvReconciler) setStaticNetworkDownloadURL(log logrus.FieldLogger,
 
 func (r *InfraEnvReconciler) updateISODownloadURL(log logrus.FieldLogger, infraEnv *aiv1beta1.InfraEnv, internalInfraEnv *common.InfraEnv) bool {
 	if infraEnv.Status.ISODownloadURL == internalInfraEnv.DownloadURL {
+		log.Infof("ISODownloadURL is the same")
 		return false
 	}
 	log.Infof("ISODownloadURL changed from %s to %s", infraEnv.Status.ISODownloadURL, internalInfraEnv.DownloadURL)
@@ -733,10 +734,11 @@ func (r *InfraEnvReconciler) setBootArtifactURLs(log logrus.FieldLogger, infraEn
 	if osImage, err = r.OsImages.GetOsImageOrLatest(internalInfraEnv.OpenshiftVersion, internalInfraEnv.CPUArchitecture); err != nil {
 		return err
 	}
+	log.Infof("CRYSTAL osImage: %+v", osImage)
 	if bootArtifactURLs, err = imageservice.GetBootArtifactURLs(r.ImageServiceBaseURL, internalInfraEnv.ID.String(), osImage, r.InsecureIPXEURLs); err != nil {
 		return err
 	}
-
+	log.Infof("CRYSTAL bootArtifactURLs: %+v", bootArtifactURLs)
 	infraEnv.Status.BootArtifacts.KernelURL = bootArtifactURLs.KernelURL
 	infraEnv.Status.BootArtifacts.RootfsURL = bootArtifactURLs.RootFSURL
 
@@ -745,6 +747,8 @@ func (r *InfraEnvReconciler) setBootArtifactURLs(log logrus.FieldLogger, infraEn
 		return err
 	}
 	if schemeUpdated || isoUpdated {
+		log.Infof("CRYSTAL schemeUpdated: %+v", schemeUpdated)
+		log.Infof("CRYSTAL isoUpdated: %+v", isoUpdated)
 		if err = r.setSignedBootArtifactURLs(infraEnv, bootArtifactURLs.InitrdURL, internalInfraEnv.ID.String()); err != nil {
 			return err
 		}
@@ -758,13 +762,15 @@ func (r *InfraEnvReconciler) updateInfraEnvStatus(
 	var err error
 	var isoUpdated bool
 	var internalInfraEnv *common.InfraEnv
-
+	patch := client.MergeFrom(infraEnv.DeepCopy())
 	internalInfraEnv, err = r.getInternalInfraEnv(ctx, log, infraEnv, cluster)
 	if err != nil {
 		return r.handleInfraEnvReconciliationError(ctx, log, infraEnv, err, internalInfraEnv)
 	}
+	log.Infof("CRYSTAL internalInfraEnv: %+v", internalInfraEnv)
 
 	if err = r.populateEventsURL(log, infraEnv, internalInfraEnv); err != nil {
+		log.WithError(err).Error("failed to populate events URL")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -773,10 +779,12 @@ func (r *InfraEnvReconciler) updateInfraEnvStatus(
 	message := aiv1beta1.InfraEnvAvailableMessage
 	if r.ImageServiceEnabled {
 		isoUpdated = r.updateISODownloadURL(log, infraEnv, internalInfraEnv)
-
+		log.Infof("CRYSTAL isoUpdated: %+v", isoUpdated)
 		if err = r.setBootArtifactURLs(log, infraEnv, internalInfraEnv, isoUpdated); err != nil {
+			log.WithError(err).Error("failed to set boot artifacts URLs")
 			return r.handleInfraEnvReconciliationError(ctx, log, infraEnv, err, internalInfraEnv)
 		}
+		log.Infof("CRYSTAL, current iso download url: %s", infraEnv.Status.ISODownloadURL)
 		message = fmt.Sprintf("%s: %s", message, aiv1beta1.ImageStateCreated)
 	}
 
@@ -787,11 +795,11 @@ func (r *InfraEnvReconciler) updateInfraEnvStatus(
 		Message: message,
 	})
 
-	if updateErr := r.Status().Update(ctx, infraEnv); updateErr != nil {
-		log.WithError(updateErr).Error("failed to update infraEnv status")
-		return ctrl.Result{Requeue: true}, nil
+	if updateErr := r.Status().Patch(ctx, infraEnv, patch); updateErr != nil {
+		log.WithError(updateErr).Error("failed to patch infraEnv status")
+		return ctrl.Result{}, updateErr
 	}
-	return ctrl.Result{Requeue: false}, nil
+	return ctrl.Result{}, nil
 }
 
 // Add conditions on ISO generation if relevant. Ignore errors if they mean it's just an image generation in progress.
