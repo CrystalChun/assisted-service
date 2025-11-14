@@ -144,6 +144,13 @@ func (r *InfraEnvReconciler) handleInfraEnvDeletion(ctx context.Context, log log
 		// Stop reconciliation as the item is being deleted
 		return ctrl.Result{}, nil
 	}
+	log.Info("InfraEnv is being deleted, handle cleanup")
+	// delete all agents owned by this infraenv
+	reply, err := r.deleteAgents(ctx, log, infraEnv)
+	if err != nil {
+		log.WithError(err).Errorf("failed to delete agents owned by infraenv %s", infraEnv.Name)
+		return reply, err
+	}
 	// deletion finalizer found, deregister the backend hosts and the infraenv
 	cleanUpErr := r.deregisterInfraEnvWithHosts(ctx, log, client.ObjectKeyFromObject(infraEnv))
 	if cleanUpErr != nil {
@@ -792,6 +799,45 @@ func (r *InfraEnvReconciler) updateInfraEnvStatus(
 		return ctrl.Result{Requeue: true}, nil
 	}
 	return ctrl.Result{Requeue: false}, nil
+}
+
+func (r *InfraEnvReconciler) deleteAgents(ctx context.Context, log logrus.FieldLogger, infraEnv *aiv1beta1.InfraEnv) (ctrl.Result, error) {
+	buildReply := func(err error) (ctrl.Result, error) {
+		reply := ctrl.Result{}
+		if err == nil {
+			return reply, nil
+		}
+		err = errors.Wrapf(err, "agents for infraenv %s not deleted", infraEnv.Name)
+		log.Error(err)
+		return reply, err
+	}
+
+	agents := &aiv1beta1.AgentList{}
+	err := r.List(ctx, agents, &client.ListOptions{Namespace: infraEnv.Namespace})
+	if err != nil {
+		log.WithError(err).Errorf("failed to list agents owned by infraenv %s", infraEnv.Name)
+		return buildReply(err)
+	}
+	for _, agent := range agents.Items {
+		// Only delete agents owned by this InfraEnv
+		isOwned := false
+		for _, ownerRef := range agent.OwnerReferences {
+			if ownerRef.Kind == "InfraEnv" && ownerRef.Name == infraEnv.Name && ownerRef.UID == infraEnv.UID {
+				isOwned = true
+				break
+			}
+		}
+		if !isOwned {
+			log.Infof("agent %s is not owned by infraenv %s, skipping deletion", agent.Name, infraEnv.Name)
+			continue
+		}
+		log.Infof("deleting agent %s owned by infraenv %s", agent.Name, infraEnv.Name)
+		if err = r.Delete(ctx, &agent); err != nil {
+			return buildReply(err)
+		}
+	}
+	log.Infof("all agents owned by infraenv %s have been deleted", infraEnv.Name)
+	return ctrl.Result{}, nil
 }
 
 // Add conditions on ISO generation if relevant. Ignore errors if they mean it's just an image generation in progress.
