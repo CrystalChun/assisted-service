@@ -818,7 +818,7 @@ func (r *InfraEnvReconciler) deleteAgents(ctx context.Context, log logrus.FieldL
 		log.WithError(err).Errorf("failed to list agents owned by infraenv %s", infraEnv.Name)
 		return buildReply(err)
 	}
-	for _, agent := range agents.Items {
+	for i, agent := range agents.Items {
 		// Only delete agents owned by this InfraEnv
 		isOwned := false
 		for _, ownerRef := range agent.OwnerReferences {
@@ -831,9 +831,34 @@ func (r *InfraEnvReconciler) deleteAgents(ctx context.Context, log logrus.FieldL
 			log.Infof("agent %s is not owned by infraenv %s, skipping deletion", agent.Name, infraEnv.Name)
 			continue
 		}
+		// Skip agents that are bound to an existing cluster
+		if agent.Spec.ClusterDeploymentName != nil {
+			clusterDeployment := &hivev1.ClusterDeployment{}
+			clusterKey := types.NamespacedName{
+				Namespace: agent.Spec.ClusterDeploymentName.Namespace,
+				Name:      agent.Spec.ClusterDeploymentName.Name,
+			}
+			getErr := r.Get(ctx, clusterKey, clusterDeployment)
+			if getErr != nil {
+				if !k8serrors.IsNotFound(getErr) {
+					log.WithError(getErr).Warnf("failed to check if cluster %s/%s exists for agent %s, skipping deletion",
+						agent.Spec.ClusterDeploymentName.Namespace, agent.Spec.ClusterDeploymentName.Name, agent.Name)
+					return buildReply(getErr)
+				}
+			}
+			if clusterDeployment.DeletionTimestamp.IsZero() {
+				log.Infof("cluster %s/%s is not being deleted, skipping deletion",
+					agent.Spec.ClusterDeploymentName.Namespace, agent.Spec.ClusterDeploymentName.Name)
+				return buildReply(fmt.Errorf("cluster %s/%s is not being deleted, skipping deletion",
+					agent.Spec.ClusterDeploymentName.Namespace, agent.Spec.ClusterDeploymentName.Name))
+			}
+			// Cluster doesn't exist (NotFound), proceed with deletion
+			log.Infof("agent %s is bound to non-existent cluster %s/%s, proceeding with deletion",
+				agent.Name, agent.Spec.ClusterDeploymentName.Namespace, agent.Spec.ClusterDeploymentName.Name)
+		}
 		log.Infof("deleting agent %s owned by infraenv %s", agent.Name, infraEnv.Name)
-		if err = r.Delete(ctx, &agent); err != nil {
-			return buildReply(err)
+		if deleteErr := r.Delete(ctx, &agents.Items[i]); deleteErr != nil {
+			return buildReply(deleteErr)
 		}
 	}
 	log.Infof("all agents owned by infraenv %s have been deleted", infraEnv.Name)
