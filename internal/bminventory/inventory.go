@@ -4986,7 +4986,7 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(ctx context.Context, kubeK
 	var err error
 	err = b.db.Transaction(func(tx *gorm.DB) error {
 		params = b.setDefaultRegisterInfraEnvParams(ctx, params)
-
+		log.Infof("Infraenv openshift version: %s", params.InfraenvCreateParams.OpenshiftVersion)
 		var cluster *common.Cluster
 		clusterId := params.InfraenvCreateParams.ClusterID
 		if clusterId != nil {
@@ -5137,6 +5137,8 @@ func (b *bareMetalInventory) RegisterInfraEnvInternal(ctx context.Context, kubeK
 				return common.NewApiError(http.StatusBadRequest, err)
 			}
 		}
+
+		log.Infof("Creating InfraEnv %s with openshift version: %s", id, infraEnv.OpenshiftVersion)
 
 		if err = tx.Create(&infraEnv).Error; err != nil {
 			log.WithError(err).Error("failed to create infraenv")
@@ -5365,6 +5367,9 @@ func (b *bareMetalInventory) UpdateInfraEnvInternal(ctx context.Context, params 
 			log.WithError(err).Errorf("failed to get infraEnv: %s", params.InfraEnvID)
 			return common.NewApiError(http.StatusNotFound, err)
 		}
+
+		log.Infof("Updating InfraEnv %s with params: %+v", params.InfraEnvID, params.InfraEnvUpdateParams)
+		log.Infof("Infraenv image version: %s", infraEnv.OpenshiftVersion)
 
 		var cluster *common.Cluster
 		clusterId := infraEnv.ClusterID

@@ -242,6 +242,7 @@ func (r *InfraEnvReconciler) updateInfraEnv(ctx context.Context, log logrus.Fiel
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("Update params for infraenv %s: %+v", infraEnv.Name, updateParams)
 
 	// UpdateInfraEnvInternal will generate an ISO only if it was not generated before
 	return r.Installer.UpdateInfraEnvInternal(ctx, updateParams, nil, mirrorRegistryConfiguration)
@@ -441,6 +442,7 @@ func (r *InfraEnvReconciler) reconcileInfraEnv(ctx context.Context, log logrus.F
 }
 
 func CreateInfraEnvParams(infraEnv *aiv1beta1.InfraEnv, imageType models.ImageType, pullSecret string, clusterID *strfmt.UUID, openshiftVersion string) installer.RegisterInfraEnvParams {
+	logrus.Infof("Creating InfraEnv params for openshift version: %s", openshiftVersion)
 	createParams := installer.RegisterInfraEnvParams{
 		InfraenvCreateParams: &models.InfraEnvCreateParams{
 			Name:                   &infraEnv.Name,
@@ -478,6 +480,7 @@ func CreateInfraEnvParams(infraEnv *aiv1beta1.InfraEnv, imageType models.ImageTy
 // If there's a cluster reference, return cluster's OpenshiftVersion
 // If OsImageVersion is specified, return value or fallback to latest if missing from ASC
 func (r *InfraEnvReconciler) getOSImageVersion(log logrus.FieldLogger, infraEnv *aiv1beta1.InfraEnv, cluster *common.Cluster) (string, error) {
+	logrus.Infof("Getting OS image version for infraenv %s", infraEnv.Name)
 	osImageVersion := infraEnv.Spec.OSImageVersion
 
 	if cluster != nil {
@@ -486,6 +489,7 @@ func (r *InfraEnvReconciler) getOSImageVersion(log logrus.FieldLogger, infraEnv 
 
 	// Only validate OS image if image service is enabled
 	if osImageVersion == "" || !r.ImageServiceEnabled {
+		logrus.Infof("OS image version is empty or image service is disabled, returning empty string")
 		return "", nil
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/openshift/assisted-service/internal/common"
 	"github.com/openshift/assisted-service/models"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 )
 
@@ -131,16 +132,21 @@ func (images osImageList) GetLatestOsImage(cpuArchitecture string) (*models.OsIm
 	var latest *models.OsImage
 	openshiftVersions := images.GetOpenshiftVersions()
 	for _, k := range openshiftVersions {
+		logrus.Infof("Getting OS image for openshift version %s and CPU architecture %s", k, cpuArchitecture)
 		osImage, err := images.GetOsImage(k, cpuArchitecture)
 		if err != nil {
+			logrus.Errorf("Error getting OS image for openshift version %s and CPU architecture %s: %v", k, cpuArchitecture, err)
 			continue
 		}
+		logrus.Infof("Got OS image for openshift version %s and CPU architecture %s: %v", k, cpuArchitecture, osImage)
 		if latest == nil {
+			logrus.Infof("Setting latest OS image for openshift version %s and CPU architecture %s: %v", k, cpuArchitecture, osImage)
 			latest = osImage
 		} else {
 			imageVer, _ := version.NewVersion(*osImage.OpenshiftVersion)
 			latestVer, _ := version.NewVersion(*latest.OpenshiftVersion)
 			if imageVer.GreaterThan(latestVer) {
+				logrus.Infof("Newer OS image found for openshift version %s and CPU architecture %s: %v", k, cpuArchitecture, osImage)
 				latest = osImage
 			}
 		}
