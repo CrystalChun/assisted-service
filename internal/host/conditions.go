@@ -26,6 +26,7 @@ const (
 	HostStageTimedOut                    = conditionId("host-stage-timed-out")
 	SoftTimeoutsEnabled                  = conditionId("soft-timeouts-enabled")
 	ConnectionTimedOut                   = conditionId("connection-timed-out")
+	IronicAgentCompleted                 = conditionId("ironic-agent-completed")
 )
 
 func (c conditionId) String() string {
@@ -111,4 +112,19 @@ func (v *validator) softTimeoutsEnabled(c *validationContext) bool {
 
 func (v *validator) connectionTimedOut(c *validationContext) bool {
 	return c.host.ConnectionTimedOut
+}
+
+func (v *validator) ironicAgentCompleted(c *validationContext) bool {
+	if c.host == nil {
+		return false
+	}
+
+	ironicAgentStatus := c.host.IronicAgentStatus
+	// If the status is not set, we consider it as not_required to prevent
+	// cases where a host was created before this change and we don't want to
+	// block the installation.
+	if ironicAgentStatus == nil {
+		return true
+	}
+	return *ironicAgentStatus == "not_required" || *ironicAgentStatus == "completed"
 }
