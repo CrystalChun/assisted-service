@@ -1823,14 +1823,13 @@ func (r *AgentReconciler) updateHostIgnitionEndpointToken(ctx context.Context, l
 	return false, nil
 }
 
-func (r *AgentReconciler) ironicAgentStatusNeedsUpdate(log logrus.FieldLogger, params *installer.V2UpdateHostParams, agent *aiv1beta1.Agent, host *common.Host, bmh *bmh_v1alpha1.BareMetalHost) bool {
+func (r *AgentReconciler) ironicAgentStatusNeedsUpdate(ctx context.Context, log logrus.FieldLogger, params *installer.V2UpdateHostParams, agent *aiv1beta1.Agent, host *common.Host, bmh *bmh_v1alpha1.BareMetalHost) bool {
 	ironicAgentFinished := bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioning || bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned
 
 	if host.IronicAgentStatus == nil {
 		// If the status is nil, then this host was created before this change
 		// So we need to check if the converged flow is enabled for this host to set the status appropriately
-		infraEnvName := agent.Labels[aiv1beta1.InfraEnvNameLabel]
-		infraEnv, err := r.Installer.GetInfraEnvByKubeKey(types.NamespacedName{Name: infraEnvName, Namespace: agent.Namespace})
+		infraEnv, err := r.Installer.GetInfraEnvInternal(ctx, installer.GetInfraEnvParams{InfraEnvID: host.InfraEnvID})
 		if err != nil {
 			log.WithError(err).Errorf("Failed to get infra env for host %s while setting ironic agent status, skipping update", agent.Name)
 			return false
@@ -1965,7 +1964,7 @@ func (r *AgentReconciler) updateIfNeeded(ctx context.Context, log logrus.FieldLo
 		return internalHost, err
 	}
 	if bmh != nil {
-		hostUpdate = hostUpdate || r.ironicAgentStatusNeedsUpdate(log, params, agent, internalHost, bmh)
+		hostUpdate = hostUpdate || r.ironicAgentStatusNeedsUpdate(ctx, log, params, agent, internalHost, bmh)
 	}
 
 	if hostUpdate {

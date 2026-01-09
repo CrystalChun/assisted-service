@@ -581,6 +581,7 @@ var _ = Describe("agent reconcile", func() {
 				Expect(c.Create(ctx, bmh)).ToNot(HaveOccurred())
 				aci := newAgentClusterInstall("test-cluster-aci", testNamespace, getDefaultAgentClusterInstallSpec("clusterDeployment-test"), clusterDeployment)
 				Expect(c.Create(ctx, aci)).To(BeNil())
+				commonHost.IronicAgentStatus = swag.String("completed")
 			})
 			createKubeconfigSecret := func(clusterDeploymentName string) {
 				secretName := fmt.Sprintf(adminKubeConfigStringTemplate, clusterDeploymentName)
@@ -2684,6 +2685,64 @@ var _ = Describe("agent reconcile", func() {
 
 		// Ensure 'state' annotation is updated
 		Expect(updatedAgent.ObjectMeta.Annotations[AgentStateAnnotation]).To(Equal(models.HostStatusInstalled))
+	})
+
+	Context("Ironic Agent Status", func() {
+		var (
+			hostID       strfmt.UUID
+			infraEnvId   strfmt.UUID
+			infraEnvName string
+			infraEnv     common.InfraEnv
+			agent        *v1beta1.Agent
+			host         *common.Host
+		)
+		BeforeEach(func() {
+			infraEnvName = "infraEnvName"
+			infraEnvId = strfmt.UUID(uuid.New().String())
+			infraEnv = common.InfraEnv{
+				InfraEnv: models.InfraEnv{
+					ID:   &infraEnvId,
+					Name: &infraEnvName,
+				},
+			}
+			hostID = strfmt.UUID(uuid.New().String())
+			agent = newAgent(hostID.String(), testNamespace, v1beta1.AgentSpec{})
+			agent.ObjectMeta.Labels = map[string]string{v1beta1.InfraEnvNameLabel: infraEnvName}
+			Expect(c.Create(ctx, agent)).To(Succeed())
+			host = &common.Host{
+				Host: models.Host{
+					ID:         &hostID,
+					InfraEnvID: infraEnvId,
+				},
+			}
+			allowGetInfraEnvInternal(mockInstallerInternal, infraEnvId, infraEnvName)
+		})
+		Context("Converged Flow is enabled", func() {
+			It("should set the ironic agent status to in_progress if the bmh doesn't have a status", func() {
+				bmh := &bmh_v1alpha1.BareMetalHost{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "bmhName",
+						Namespace: testNamespace,
+					},
+				}
+				Expect(c.Create(ctx, bmh)).To(Succeed())
+				infraEnv.InternalIgnitionConfigOverride = "ironic-config"
+				mockInstallerInternal.EXPECT().GetHostByKubeKey(gomock.Any()).Return(host, nil).Times(1)
+				mockInstallerInternal.EXPECT().GetInfraEnvInternal(gomock.Any(), gomock.Any()).Return(&infraEnv, nil).Times(1)
+				params := installer.V2UpdateHostParams{
+					HostID:     hostID,
+					InfraEnvID: infraEnvId,
+					HostUpdateParams: &models.HostUpdateParams{
+						IronicAgentStatus: swag.String("in_progress"),
+					},
+				}
+				mockInstallerInternal.EXPECT().V2UpdateHostInternal(gomock.Any(), params, gomock.Any()).Return(host, nil).Times(1)
+				result, err := hr.Reconcile(ctx, newHostRequest(agent))
+				Expect(err).To(BeNil())
+				Expect(result).To(Equal(ctrl.Result{}))
+
+			})
+		})
 	})
 })
 
