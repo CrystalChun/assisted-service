@@ -5841,6 +5841,11 @@ func (b *bareMetalInventory) V2RegisterHost(ctx context.Context, params installe
 		// extra nodes (as workers). In that case, this line might need to be removed.
 		defaultRole := models.HostRoleAutoAssign
 
+		ironicAgentStatus := "not_required"
+		if infraEnv.InternalIgnitionConfigOverride != "" {
+			ironicAgentStatus = "in_progress"
+		}
+
 		host = &models.Host{
 			ID:                       params.NewHostParams.HostID,
 			Href:                     swag.String(url.String()),
@@ -5853,6 +5858,7 @@ func (b *bareMetalInventory) V2RegisterHost(ctx context.Context, params installe
 			SuggestedRole:            defaultRole,
 			InfraEnvID:               *infraEnv.ID,
 			IgnitionEndpointTokenSet: false,
+			IronicAgentStatus:        swag.String(ironicAgentStatus),
 		}
 
 		if cluster != nil {
