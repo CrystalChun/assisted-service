@@ -90,6 +90,7 @@ const (
 	BMH_PAUSED_ANNOTATION               = "baremetalhost.metal3.io/paused"
 	BMH_STATUS_ANNOTATION               = "baremetalhost.metal3.io/status"
 	BMH_INSPECT_ANNOTATION              = "inspect.metal3.io"
+	BMH_FORCE_DETACH_ANNOTATION_VALUE   = "force:true"
 	BMH_HARDWARE_DETAILS_ANNOTATION     = "inspect.metal3.io/hardwaredetails"
 	BMH_AGENT_IGNITION_CONFIG_OVERRIDES = "bmac.agent-install.openshift.io/ignition-config-overrides"
 	BMH_FINALIZER_NAME                  = "bmac.agent-install.openshift.io/deprovision"
@@ -689,7 +690,36 @@ func (r *BMACReconciler) reconcileClusterReference(bmh *bmh_v1alpha1.BareMetalHo
 	return false, nil
 }
 
+// If the BMH has the force detach annotation, check if the BMH is in a state to be set to provisioned
+// If the BMH is in a state to be set to provisioned, we can remove the force detach annotation
+func (r *BMACReconciler) handleDetachedAnnotation(ctx context.Context, log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
+	dirty := false
+	if bmh.ObjectMeta.Annotations[BMH_DETACHED_ANNOTATION] == BMH_FORCE_DETACH_ANNOTATION_VALUE {
+		// Check if BMH is forced detached either by status or annotation set by BMO
+		// If the detached is done then we should set status to provisioned
+		if bmh.Status.OperationalStatus == bmh_v1alpha1.OperationalStatusDetached {
+			bmh.Status.Provisioning.State = bmh_v1alpha1.StateProvisioned // are we allowed to do this?
+			dirty = true
+		}
+		if bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned { // how do we check this?
+			// already provsioned means we should remove the force detach annotation
+			delete(bmh.ObjectMeta.Annotations, BMH_DETACHED_ANNOTATION)
+			dirty = true
+		}
+		return reconcileRequeue{dirty: dirty}
+	}
+	return nil
+}
+
 func (r *BMACReconciler) handlePauseAndDetachBMHAnnotations(ctx context.Context, log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
+	result := reconcileComplete{}
+
+	// Ensure we're handling the force detach annotation first
+	handleDetachedAnnotationResult := r.handleDetachedAnnotation(ctx, log, bmh, agent)
+	if handleDetachedAnnotationResult != nil {
+		return handleDetachedAnnotationResult
+	}
+
 	// ensure the paused and detached annotations do not exist if the host management annotation is set and the delete annotation is unset
 	if metav1.HasAnnotation(bmh.ObjectMeta, BMH_HOST_MANAGEMENT_ANNOTATION) {
 		if r.ConvergedFlowEnabled && !metav1.HasAnnotation(bmh.ObjectMeta, BMH_DELETE_ANNOTATION) {
@@ -702,17 +732,11 @@ func (r *BMACReconciler) handlePauseAndDetachBMHAnnotations(ctx context.Context,
 			bmh.Name, bmh.Namespace, BMH_DELETE_ANNOTATION)
 	}
 
-	result := reconcileComplete{}
-	// detach when provisioned for converged or anytime after reboot for non-converged
-	nonConvergedDetachStages := []models.HostStage{models.HostStageFailed, models.HostStageRebooting, models.HostStageJoined, models.HostStageDone}
-	if r.ConvergedFlowEnabled && bmh.Status.Provisioning.State == bmh_v1alpha1.StateProvisioned ||
-		!r.ConvergedFlowEnabled && agent != nil && funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
-		res := r.ensureBMHDetached(log, bmh, agent)
-		if _, err := res.Result(); err != nil {
-			return res
-		}
-		result.dirty = res.Dirty()
+	res := r.ensureBMHDetached(log, bmh, agent)
+	if _, err := res.Result(); err != nil {
+		return res
 	}
+	result.dirty = res.Dirty()
 
 	if r.PauseProvisionedBMHs {
 		// Add 'status' and 'paused' annotations for provisioned BMHs
@@ -731,24 +755,41 @@ func (r *BMACReconciler) handlePauseAndDetachBMHAnnotations(ctx context.Context,
 	return result
 }
 
-func (r *BMACReconciler) detachedValue(bmh *bmh_v1alpha1.BareMetalHost) (string, error) {
-	detachValue := []byte("assisted-service-controller")
-	if _, has_annotation := bmh.GetAnnotations()[BMH_DELETE_ANNOTATION]; has_annotation && r.ConvergedFlowEnabled {
+func (r *BMACReconciler) detachedValue(bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) (string, error) {
+	if !r.ConvergedFlowEnabled {
+		// Only detach when Agent is in a non-converged detach stage: anytime after reboot
+		nonConvergedDetachStages := []models.HostStage{models.HostStageFailed, models.HostStageRebooting, models.HostStageJoined, models.HostStageDone}
+		if agent != nil && funk.Contains(nonConvergedDetachStages, agent.Status.Progress.CurrentStage) {
+			return "assisted-service-controller", nil
+		}
+		return "", nil
+	}
+
+	// Force detach if the BMH is not provisioned and the Agent indicates the host has joined the cluster
+	force := bmh.Status.Provisioning.State != bmh_v1alpha1.StateProvisioned && agent != nil && funk.Contains([]models.HostStage{models.HostStageJoined, models.HostStageDone}, agent.Status.Progress.CurrentStage)
+	if force {
+		return BMH_FORCE_DETACH_ANNOTATION_VALUE, nil
+	}
+
+	// If the BMH is not provisioned, do not detach
+	if bmh.Status.Provisioning.State != bmh_v1alpha1.StateProvisioned {
+		return "", nil
+	}
+
+	// If the BMH has the delete annotation, set the delete action to delay
+	if _, has_annotation := bmh.GetAnnotations()[BMH_DELETE_ANNOTATION]; has_annotation {
 		arg := bmh_v1alpha1.DetachedAnnotationArguments{DeleteAction: bmh_v1alpha1.DetachedDeleteActionDelay}
 		var err error
-		detachValue, err = json.Marshal(arg)
+		detachValue, err := json.Marshal(arg)
 		if err != nil {
 			return "", err
 		}
+		return string(detachValue), nil
 	}
-	return string(detachValue), nil
+	return "assisted-service-controller", nil
 }
 
 func (r *BMACReconciler) ensureBMHDetached(log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost, agent *aiv1beta1.Agent) reconcileResult {
-	if bmh.ObjectMeta.Annotations == nil {
-		bmh.ObjectMeta.Annotations = make(map[string]string)
-	}
-
 	// it's possible this BMH doesn't have a matching agent when this is called in some cases
 	if agent != nil {
 		//check if we are in unbinding-pending-user-action status. If yes, we should not
@@ -760,10 +801,18 @@ func (r *BMACReconciler) ensureBMHDetached(log logrus.FieldLogger, bmh *bmh_v1al
 		}
 	}
 
-	desiredValue, err := r.detachedValue(bmh)
+	desiredValue, err := r.detachedValue(bmh, agent)
 	if err != nil {
 		return reconcileError{err: err}
 	}
+	if desiredValue == "" {
+		// No need to add/update the detached annotation
+		return reconcileComplete{}
+	}
+	if bmh.ObjectMeta.Annotations == nil {
+		bmh.ObjectMeta.Annotations = make(map[string]string)
+	}
+
 	currentValue, haveAnnotation := bmh.ObjectMeta.Annotations[BMH_DETACHED_ANNOTATION]
 	if haveAnnotation && currentValue == desiredValue {
 		return reconcileComplete{}
@@ -1836,6 +1885,7 @@ func (r *BMACReconciler) ensureBMHIsLabelled(ctx context.Context, log logrus.Fie
 }
 
 func removeBMHDetachedAnnotation(log logrus.FieldLogger, bmh *bmh_v1alpha1.BareMetalHost) (dirty bool) {
+	// do we need to be concerned about the force detach annotation?
 	if _, ok := bmh.GetAnnotations()[BMH_DETACHED_ANNOTATION]; ok {
 		log.Info("removing BMH detached annotation")
 		delete(bmh.Annotations, BMH_DETACHED_ANNOTATION)
