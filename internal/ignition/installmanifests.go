@@ -1210,11 +1210,13 @@ func (g *installerGenerator) modifyPointerIgnitionMCP(poolName string, ignitionS
 func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile string, workDir string) error {
 	config, err := ignitioncommon.ParseIgnitionFile(filepath.Join(workDir, baseFile))
 	if err != nil {
+		g.log.WithError(err).Errorf("Failed to parse ignition file for host %s", host.ID)
 		return err
 	}
 
 	hostname, err := hostutil.GetCurrentHostName(host)
 	if err != nil {
+		g.log.WithError(err).Errorf("Failed to get hostname for host %s", host.ID)
 		return errors.Wrapf(err, "failed to get hostname for host %s", host.ID)
 	}
 
@@ -1223,6 +1225,7 @@ func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile str
 		machineCidr := g.cluster.MachineNetworks[0]
 		ip, _, errP := net.ParseCIDR(string(machineCidr.Cidr))
 		if errP != nil {
+			g.log.WithError(errP).Errorf("Failed to parse machine cidr for node ip hint content")
 			return errors.Wrapf(errP, "Failed to parse machine cidr for node ip hint content")
 		}
 		ignitioncommon.SetFileInIgnition(config, nodeIpHintFile, fmt.Sprintf("data:,KUBELET_NODEIP_HINT=%s", ip), false, 420, true)
@@ -1236,12 +1239,14 @@ func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile str
 
 	configBytes, err := json.Marshal(config)
 	if err != nil {
+		g.log.WithError(err).Errorf("Failed to marshal ignition config for host %s", host.ID)
 		return err
 	}
 
 	if host.IgnitionConfigOverrides != "" {
 		merged, mergeErr := ignitioncommon.MergeIgnitionConfig(configBytes, []byte(host.IgnitionConfigOverrides))
 		if mergeErr != nil {
+			g.log.WithError(mergeErr).Errorf("Failed to apply ignition config overrides for host %s", host.ID)
 			return errors.Wrapf(mergeErr, "failed to apply ignition config overrides for host %s", host.ID)
 		}
 		configBytes = []byte(merged)
@@ -1251,6 +1256,7 @@ func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile str
 		var override string
 		override, err = g.modifyPointerIgnitionMCP(host.MachineConfigPoolName, string(configBytes), host.ClusterID)
 		if err != nil {
+			g.log.WithError(err).Errorf("Failed to set machine config pool %s to pointer ignition for host %s", host.MachineConfigPoolName, host.ID.String())
 			return errors.Wrapf(err, "failed to set machine config pool %s to pointer ignition for host %s",
 				host.MachineConfigPoolName, host.ID.String())
 		}
@@ -1258,10 +1264,20 @@ func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile str
 	}
 
 	inventory := models.Inventory{}
+	g.log.Infof("Inventory: %s", host.Inventory)
 	if host.Inventory != "" {
+
 		if err = json.Unmarshal([]byte(host.Inventory), &inventory); err != nil {
-			return err
+			g.log.WithError(err).Errorf("Failed to unmarshal inventory for host %s", host.ID)
+			return errors.Wrapf(err, "failed to unmarshal inventory for host %s", host.ID)
 		}
+	} else {
+		g.log.Infof("No inventory found for host %s", host.ID)
+	}
+	if inventory.Boot == nil {
+		g.log.Infof("No boot found for host %s", host.ID)
+	} else {
+		g.log.Infof("Boot found for host %s: %+v", host.ID, inventory.Boot)
 	}
 	if inventory.Boot != nil && inventory.Boot.DeviceType == models.BootDeviceTypePersistent {
 		g.log.Infof("Adding stateroot cleanup ignition override for host %s", host.ID)
@@ -1274,6 +1290,7 @@ func (g *installerGenerator) writeSingleHostFile(host *models.Host, baseFile str
 
 	err = os.WriteFile(filepath.Join(workDir, hostutil.IgnitionFileName(host)), configBytes, 0600)
 	if err != nil {
+		g.log.WithError(err).Errorf("Failed to write ignition for host %s", host.ID)
 		return errors.Wrapf(err, "failed to write ignition for host %s", host.ID)
 	}
 
