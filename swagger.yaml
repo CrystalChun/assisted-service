@@ -8033,6 +8033,9 @@ definitions:
   api_vip:
     type: object
     description: The virtual IP used to reach the OpenShift cluster's API.
+    required:
+      - cluster_id
+      - ip
     properties:
       cluster_id:
         type: string
