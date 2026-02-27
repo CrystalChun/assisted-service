@@ -60,14 +60,6 @@ const (
 	PreprovisioningImageFinalizerName = "preprovisioningimage." + aiv1beta1.Group + "/ai-deprovision"
 )
 
-type PreprovisioningImageControllerConfig struct {
-	// The default ironic agent image was obtained by running "oc adm release info --image-for=ironic-agent  quay.io/openshift-release-dev/ocp-release:4.11.0-fc.0-x86_64"
-	BaremetalIronicAgentImage string `envconfig:"IRONIC_AGENT_IMAGE" default:"quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:d3f1d4d3cd5fbcf1b9249dd71d01be4b901d337fdc5f8f66569eb71df4d9d446"`
-	// The default ironic agent image for arm architecture was obtained by running "oc adm release info --image-for=ironic-agent quay.io/openshift-release-dev/ocp-release@sha256:1b8e71b9bccc69c732812ebf2bfba62af6de77378f8329c8fec10b63a0dbc33c"
-	// The release image digest for arm architecture was obtained from this link https://mirror.openshift.com/pub/openshift-v4/aarch64/clients/ocp-dev-preview/4.11.0-fc.0/release.txt
-	BaremetalIronicAgentImageForArm string `envconfig:"IRONIC_AGENT_IMAGE_ARM" default:"quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:cb0edf19fffc17f542a7efae76939b1e9757dc75782d4727fb0aa77ed5809b43"`
-}
-
 // PreprovisioningImage reconciles a AgentClusterInstall object
 type PreprovisioningImageReconciler struct {
 	client.Client
@@ -77,7 +69,6 @@ type PreprovisioningImageReconciler struct {
 	VersionsHandler         versions.Handler
 	OcRelease               oc.Release
 	ReleaseImageMirror      string
-	Config                  PreprovisioningImageControllerConfig
 	hubIronicAgentImage     string
 	hubReleaseArchitectures []string
 	BMOUtils                BMOUtils
@@ -527,24 +518,12 @@ func (r *PreprovisioningImageReconciler) getIronicAgentImageFromClusterImageSet(
 	return ironicAgentImage
 }
 
-func (r *PreprovisioningImageReconciler) getIronicAgentDefaultImage(log logrus.FieldLogger, infraEnvInternal *common.InfraEnv) string {
-	var ironicAgentImage string
-	if infraEnvInternal.CPUArchitecture == common.ARM64CPUArchitecture {
-		ironicAgentImage = r.Config.BaremetalIronicAgentImageForArm
-	} else {
-		ironicAgentImage = r.Config.BaremetalIronicAgentImage
-	}
-
-	log.Infof("Setting default ironic agent image (%s)", ironicAgentImage)
-	return ironicAgentImage
-}
-
 // getIronicAgentImageByPriority returns the ironic agent image based on priority order
 // Priority 1: User override annotation
 // Priority 2: ICC config (if architecture matches)
 // Priority 3: Hub release image (if architectures matches OR using a multi release image)
 // Priority 4: ClusterImageSet query
-// Priority 5: Default image (lowest priority)
+// Returns nothing if no image is found
 func (r *PreprovisioningImageReconciler) getIronicAgentImageByPriority(
 	ctx context.Context,
 	log logrus.FieldLogger,
@@ -569,7 +548,7 @@ func (r *PreprovisioningImageReconciler) getIronicAgentImageByPriority(
 		return image
 	}
 
-	return r.getIronicAgentDefaultImage(log, infraEnvInternal)
+	return ""
 }
 
 func (r *PreprovisioningImageReconciler) getIronicConfig(ctx context.Context, log logrus.FieldLogger, infraEnv *aiv1beta1.InfraEnv, infraEnvInternal *common.InfraEnv) (*ICCConfig, error) {
@@ -590,7 +569,7 @@ func (r *PreprovisioningImageReconciler) getIronicConfig(ctx context.Context, lo
 	iccConfig.IronicAgentImage = r.getIronicAgentImageByPriority(ctx, log, infraEnv, infraEnvInternal, iccConfig.IronicAgentImage)
 
 	if iccConfig.IronicAgentImage == "" {
-		return nil, fmt.Errorf("Failed to determine ironic config")
+		return nil, fmt.Errorf("could not determine ironic agent image to use")
 	}
 
 	log.Debugf("Ironic Agent Image is (%s) Ironic URL is (%s) Inspector URL is (%s)",

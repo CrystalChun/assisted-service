@@ -136,11 +136,7 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 			CRDEventsHandler: mockCRDEventsHandler,
 			VersionsHandler:  mockVersionHandler,
 			OcRelease:        mockOcRelease,
-			Config: PreprovisioningImageControllerConfig{
-				BaremetalIronicAgentImage:       defaultIronicImage,
-				BaremetalIronicAgentImageForArm: "ironic-agent-arm64:latest",
-			},
-			BMOUtils: mockBMOUtils,
+			BMOUtils:         mockBMOUtils,
 		}
 		clusterVersion = &configv1.ClusterVersion{
 			ObjectMeta: metav1.ObjectMeta{Name: "version"},
@@ -184,19 +180,10 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 			mockInstallerInternal.EXPECT().GetInfraEnvByKubeKey(gomock.Any()).Return(backendInfraEnv, nil)
 		}
 
-		It("Adds the default ironic Ignition to the infraEnv when no clusterID is set", func() {
+		It("returns an error when no clusterID is set", func() {
 			Expect(c.Create(ctx, infraEnv)).To(BeNil())
 			backendInfraEnv.ClusterID = ""
 			mockInstallerInternal.EXPECT().GetInfraEnvByKubeKey(gomock.Any()).Return(backendInfraEnv, nil)
-			mockInstallerInternal.EXPECT().UpdateInfraEnvInternal(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-				Do(func(ctx context.Context, params installer.UpdateInfraEnvParams, internalIgnitionConfig *string, mirrorRegistryConfiguration *common.MirrorRegistryConfiguration) {
-					Expect(params.InfraEnvID).To(Equal(*backendInfraEnv.ID))
-					Expect(params.InfraEnvUpdateParams.IgnitionConfigOverride).To(Equal(""))
-					Expect(*internalIgnitionConfig).Should(ContainSubstring(defaultIronicImage))
-					Expect(*internalIgnitionConfig).Should(ContainSubstring(ironicServiceIPs[0]))
-					Expect(*internalIgnitionConfig).Should(ContainSubstring(ironicInspectorIPs[0]))
-				}).Return(
-				&common.InfraEnv{InfraEnv: models.InfraEnv{ID: &infraEnvID, DownloadURL: downloadURL, CPUArchitecture: infraEnvArch}, GeneratedAt: strfmt.DateTime(time.Now())}, nil).Times(1)
 			mockCRDEventsHandler.EXPECT().NotifyInfraEnvUpdates(infraEnv.Name, infraEnv.Namespace).Times(1)
 			mockBMOUtils.EXPECT().getICCConfig(gomock.Any()).Times(1).Return(nil, errors.Errorf("ICC configuration is not available"))
 			res, err := pr.Reconcile(ctx, newPreprovisioningImageRequest(ppi))
@@ -208,7 +195,18 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 				Name:      "testInfraEnv",
 			}
 			Expect(c.Get(ctx, key, infraEnv)).To(BeNil())
-			Expect(infraEnv.ObjectMeta.Annotations[EnableIronicAgentAnnotation]).To(Equal("true"))
+			Expect(infraEnv.ObjectMeta.Annotations).ToNot(HaveKey(EnableIronicAgentAnnotation))
+			image := &metal3_v1alpha1.PreprovisioningImage{}
+			Expect(c.Get(ctx, key, image)).To(BeNil())
+			Expect(image.Status.Conditions).To(HaveLen(2))
+			Expect(image.Status.Conditions[0].Type).To(Equal(metal3_v1alpha1.ConditionImageReady))
+			Expect(image.Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
+			Expect(image.Status.Conditions[0].Reason).To(Equal("IronicAgentIgnitionUpdateFailure"))
+			Expect(image.Status.Conditions[0].Message).To(Equal("Could not add ironic agent to image: could not determine ironic agent image to use"))
+			Expect(image.Status.Conditions[1].Type).To(Equal(metal3_v1alpha1.ConditionImageError))
+			Expect(image.Status.Conditions[1].Status).To(Equal(metav1.ConditionTrue))
+			Expect(image.Status.Conditions[1].Reason).To(Equal("IronicAgentImageNotFound"))
+			Expect(image.Status.Conditions[1].Message).To(Equal("Could not add ironic agent to image: could not determine ironic agent image to use"))
 		})
 		It("Adds the ironic IPv6 address to the ignition when the spoke cluster is IPv6 only", func() {
 			backendCluster.ClusterNetworks = []*models.ClusterNetwork{
@@ -721,7 +719,7 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 			Expect(c.Get(ctx, key, infraEnv)).To(BeNil())
 			Expect(infraEnv.ObjectMeta.Annotations[EnableIronicAgentAnnotation]).To(Equal("true"))
 		})
-		It("uses the default ironic agent image when the infraenv arch isn't supported by the agent image in the ICC config", func() {
+		It("returns an error when the infraenv arch isn't supported by the agent image in the ICC config", func() {
 			Expect(c.Create(ctx, clusterVersion)).To(Succeed())
 			Expect(c.Create(ctx, infraEnv)).To(BeNil())
 
@@ -738,15 +736,7 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 			mockOcRelease.EXPECT().GetReleaseArchitecture(gomock.Any(), hubReleaseImage, "", backendInfraEnv.PullSecret).Times(1).Return([]string{"arm64"}, nil)
 			mockOcRelease.EXPECT().GetIronicAgentImage(gomock.Any(), hubReleaseImage, "", backendInfraEnv.PullSecret).Return("ironic-image:4.12.0", nil)
 			mockVersionHandler.EXPECT().GetReleaseImage(gomock.Any(), "4.12.0-rc.3", "x86_64", backendInfraEnv.PullSecret).Return(nil, errors.Errorf("no release found"))
-			mockInstallerInternal.EXPECT().UpdateInfraEnvInternal(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-				Do(func(ctx context.Context, params installer.UpdateInfraEnvParams, internalIgnitionConfig *string, mirrorRegistryConfiguration *common.MirrorRegistryConfiguration) {
-					Expect(params.InfraEnvID).To(Equal(*backendInfraEnv.ID))
-					Expect(params.InfraEnvUpdateParams.IgnitionConfigOverride).To(Equal(""))
-					Expect(*internalIgnitionConfig).Should(ContainSubstring("ironic"))
-					Expect(*internalIgnitionConfig).Should(ContainSubstring(defaultIronicImage))
-				}).Return(
-				&common.InfraEnv{InfraEnv: models.InfraEnv{ClusterID: clusterID, ID: &infraEnvID, DownloadURL: downloadURL, CPUArchitecture: infraEnvArch}, GeneratedAt: strfmt.DateTime(time.Now())}, nil).Times(1)
-			mockCRDEventsHandler.EXPECT().NotifyInfraEnvUpdates(infraEnv.Name, infraEnv.Namespace).Times(1)
+
 			mockBMOUtils.EXPECT().getICCConfig(gomock.Any()).Times(1).Return(&iccConfig, nil)
 			res, err := pr.Reconcile(ctx, newPreprovisioningImageRequest(ppi))
 			Expect(err).To(BeNil())
@@ -757,7 +747,18 @@ var _ = Describe("PreprovisioningImage reconcile", func() {
 				Name:      "testInfraEnv",
 			}
 			Expect(c.Get(ctx, key, infraEnv)).To(BeNil())
-			Expect(infraEnv.ObjectMeta.Annotations[EnableIronicAgentAnnotation]).To(Equal("true"))
+			Expect(infraEnv.ObjectMeta.Annotations).ToNot(HaveKey(EnableIronicAgentAnnotation))
+			image := &metal3_v1alpha1.PreprovisioningImage{}
+			Expect(c.Get(ctx, key, image)).To(BeNil())
+			Expect(image.Status.Conditions).To(HaveLen(2))
+			Expect(image.Status.Conditions[0].Type).To(Equal(metal3_v1alpha1.ConditionImageReady))
+			Expect(image.Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
+			Expect(image.Status.Conditions[0].Reason).To(Equal("IronicAgentIgnitionUpdateFailure"))
+			Expect(image.Status.Conditions[0].Message).To(Equal("Could not add ironic agent to image: could not determine ironic agent image to use"))
+			Expect(image.Status.Conditions[1].Type).To(Equal(metal3_v1alpha1.ConditionImageError))
+			Expect(image.Status.Conditions[1].Status).To(Equal(metav1.ConditionTrue))
+			Expect(image.Status.Conditions[1].Reason).To(Equal("IronicAgentImageNotFound"))
+			Expect(image.Status.Conditions[1].Message).To(Equal("Could not add ironic agent to image: could not determine ironic agent image to use"))
 		})
 		It("Add the ironic Ignition to the infraEnv using the ironic agent image from the hub release", func() {
 			Expect(c.Create(ctx, clusterVersion)).To(Succeed())
