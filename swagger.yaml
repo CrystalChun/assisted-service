@@ -5485,6 +5485,18 @@ definitions:
         x-nullable: true
       load_balancer:
         $ref: '#/definitions/load_balancer'
+      ocp_release_image:
+        type: string
+        description: The OpenShift release image URI to install the cluster with.
+      cpu_architecture:
+        type: string
+        x-nullable: false
+        default: 'x86_64'
+        # TODO: remove arm64 when AI moves to using aarch64
+        enum: ['x86_64', 'aarch64', 'arm64','ppc64le','s390x','multi']
+      openshift_version:
+        type: string
+        description: Version of the OpenShift cluster.
 
   import-cluster-params:
     type: object

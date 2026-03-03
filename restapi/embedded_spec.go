@@ -11169,6 +11169,19 @@ func init() {
           "type": "integer",
           "x-nullable": true
         },
+        "cpu_architecture": {
+          "type": "string",
+          "default": "x86_64",
+          "enum": [
+            "x86_64",
+            "aarch64",
+            "arm64",
+            "ppc64le",
+            "s390x",
+            "multi"
+          ],
+          "x-nullable": false
+        },
         "disk_encryption": {
           "description": "Installation disks encryption mode and host roles to be applied.",
           "$ref": "#/definitions/disk-encryption"
@@ -11253,12 +11266,20 @@ func init() {
           "type": "string",
           "x-nullable": true
         },
+        "ocp_release_image": {
+          "description": "The OpenShift release image URI to install the cluster with.",
+          "type": "string"
+        },
         "olm_operators": {
           "description": "List of OLM operators to be installed.\nFor the full list of supported operators, check the endpoint ` + "`" + `/v2/supported-operators` + "`" + `:\n",
           "type": "array",
           "items": {
             "$ref": "#/definitions/operator-create-params"
           }
+        },
+        "openshift_version": {
+          "description": "Version of the OpenShift cluster.",
+          "type": "string"
         },
         "platform": {
           "$ref": "#/definitions/platform"
@@ -22687,6 +22708,19 @@ func init() {
           "type": "integer",
           "x-nullable": true
         },
+        "cpu_architecture": {
+          "type": "string",
+          "default": "x86_64",
+          "enum": [
+            "x86_64",
+            "aarch64",
+            "arm64",
+            "ppc64le",
+            "s390x",
+            "multi"
+          ],
+          "x-nullable": false
+        },
         "disk_encryption": {
           "description": "Installation disks encryption mode and host roles to be applied.",
           "$ref": "#/definitions/disk-encryption"
@@ -22771,12 +22805,20 @@ func init() {
           "type": "string",
           "x-nullable": true
         },
+        "ocp_release_image": {
+          "description": "The OpenShift release image URI to install the cluster with.",
+          "type": "string"
+        },
         "olm_operators": {
           "description": "List of OLM operators to be installed.\nFor the full list of supported operators, check the endpoint ` + "`" + `/v2/supported-operators` + "`" + `:\n",
           "type": "array",
           "items": {
             "$ref": "#/definitions/operator-create-params"
           }
+        },
+        "openshift_version": {
+          "description": "Version of the OpenShift cluster.",
+          "type": "string"
         },
         "platform": {
           "$ref": "#/definitions/platform"

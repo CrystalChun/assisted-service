@@ -48,6 +48,10 @@ type V2ClusterUpdateParams struct {
 	// Specifies the required number of control plane nodes that should be part of the cluster.
 	ControlPlaneCount *int64 `json:"control_plane_count,omitempty"`
 
+	// cpu architecture
+	// Enum: [x86_64 aarch64 arm64 ppc64le s390x multi]
+	CPUArchitecture string `json:"cpu_architecture,omitempty"`
+
 	// Installation disks encryption mode and host roles to be applied.
 	DiskEncryption *DiskEncryption `json:"disk_encryption,omitempty" gorm:"embedded;embeddedPrefix:disk_encryption_"`
 
@@ -102,10 +106,16 @@ type V2ClusterUpdateParams struct {
 	// An "*" or a comma-separated list of destination domain names, domains, IP addresses, or other network CIDRs to exclude from proxying.
 	NoProxy *string `json:"no_proxy,omitempty"`
 
+	// The OpenShift release image URI to install the cluster with.
+	OcpReleaseImage string `json:"ocp_release_image,omitempty"`
+
 	// List of OLM operators to be installed.
 	// For the full list of supported operators, check the endpoint `/v2/supported-operators`:
 	//
 	OlmOperators []*OperatorCreateParams `json:"olm_operators"`
+
+	// Version of the OpenShift cluster.
+	OpenshiftVersion string `json:"openshift_version,omitempty"`
 
 	// platform
 	Platform *Platform `json:"platform,omitempty" gorm:"embedded;embeddedPrefix:platform_"`
@@ -153,6 +163,10 @@ func (m *V2ClusterUpdateParams) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := m.validateClusterNetworks(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateCPUArchitecture(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -289,6 +303,60 @@ func (m *V2ClusterUpdateParams) validateClusterNetworks(formats strfmt.Registry)
 			}
 		}
 
+	}
+
+	return nil
+}
+
+var v2ClusterUpdateParamsTypeCPUArchitecturePropEnum []interface{}
+
+func init() {
+	var res []string
+	if err := json.Unmarshal([]byte(`["x86_64","aarch64","arm64","ppc64le","s390x","multi"]`), &res); err != nil {
+		panic(err)
+	}
+	for _, v := range res {
+		v2ClusterUpdateParamsTypeCPUArchitecturePropEnum = append(v2ClusterUpdateParamsTypeCPUArchitecturePropEnum, v)
+	}
+}
+
+const (
+
+	// V2ClusterUpdateParamsCPUArchitectureX8664 captures enum value "x86_64"
+	V2ClusterUpdateParamsCPUArchitectureX8664 string = "x86_64"
+
+	// V2ClusterUpdateParamsCPUArchitectureAarch64 captures enum value "aarch64"
+	V2ClusterUpdateParamsCPUArchitectureAarch64 string = "aarch64"
+
+	// V2ClusterUpdateParamsCPUArchitectureArm64 captures enum value "arm64"
+	V2ClusterUpdateParamsCPUArchitectureArm64 string = "arm64"
+
+	// V2ClusterUpdateParamsCPUArchitecturePpc64le captures enum value "ppc64le"
+	V2ClusterUpdateParamsCPUArchitecturePpc64le string = "ppc64le"
+
+	// V2ClusterUpdateParamsCPUArchitectureS390x captures enum value "s390x"
+	V2ClusterUpdateParamsCPUArchitectureS390x string = "s390x"
+
+	// V2ClusterUpdateParamsCPUArchitectureMulti captures enum value "multi"
+	V2ClusterUpdateParamsCPUArchitectureMulti string = "multi"
+)
+
+// prop value enum
+func (m *V2ClusterUpdateParams) validateCPUArchitectureEnum(path, location string, value string) error {
+	if err := validate.EnumCase(path, location, value, v2ClusterUpdateParamsTypeCPUArchitecturePropEnum, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *V2ClusterUpdateParams) validateCPUArchitecture(formats strfmt.Registry) error {
+	if swag.IsZero(m.CPUArchitecture) { // not required
+		return nil
+	}
+
+	// value enum
+	if err := m.validateCPUArchitectureEnum("cpu_architecture", "body", m.CPUArchitecture); err != nil {
+		return err
 	}
 
 	return nil
