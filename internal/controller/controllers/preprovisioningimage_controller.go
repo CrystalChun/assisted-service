@@ -127,15 +127,33 @@ func (r *PreprovisioningImageReconciler) Reconcile(origCtx context.Context, req 
 		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, setUnsupportedFormatCondition)
 	}
 
+	// Update image status from InfraEnv and add ironic agent
+	result, err, done := r.reconcileInfraEnvAndUpdateStatus(ctx, log, image, true)
+	if done {
+		return result, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileInfraEnvAndUpdateStatus handles the common logic of finding the InfraEnv,
+// validating it, and updating the image status. Returns (result, error, done) where
+// done=true means the caller should return immediately with the given result and error.
+func (r *PreprovisioningImageReconciler) reconcileInfraEnvAndUpdateStatus(
+	ctx context.Context,
+	log logrus.FieldLogger,
+	image *metal3_v1alpha1.PreprovisioningImage,
+	shouldAddIronicAgent bool,
+) (ctrl.Result, error, bool) {
 	// Retrieve InfraEnv
 	infraEnv, err := r.findInfraEnvForPreprovisioningImage(ctx, log, image)
 	if err != nil {
 		log.WithError(err).Error("failed to get corresponding infraEnv")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, err, true
 	}
 	if infraEnv == nil || !infraEnv.DeletionTimestamp.IsZero() {
 		log.Warn("infraEnv is not found or is being deleted")
-		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, setInfraEnvNotAvailableCondition)
+		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, setInfraEnvNotAvailableCondition), true
 	}
 
 	log = log.WithFields(logrus.Fields{
@@ -149,27 +167,29 @@ func (r *PreprovisioningImageReconciler) Reconcile(origCtx context.Context, req 
 		log.Infof("Image arch %s does not match infraEnv arch %s", imageArch, infraArch)
 		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, func(img *metal3_v1alpha1.PreprovisioningImage) {
 			setMismatchedArchCondition(img, imageArch, infraArch)
-		})
+		}), true
 	}
 
-	infraEnvUpdated, err := r.AddIronicAgentToInfraEnv(ctx, log, infraEnv)
-	if infraEnvUpdated {
-		return ctrl.Result{}, nil
-	}
-	if err != nil {
-		patchErr := r.patchImageStatus(ctx, log, image, func(img *metal3_v1alpha1.PreprovisioningImage) {
-			setIronicAgentIgnitionFailureCondition(img, err)
-		})
-		if patchErr != nil {
-			return ctrl.Result{}, patchErr
+	if shouldAddIronicAgent {
+		infraEnvUpdated, err := r.AddIronicAgentToInfraEnv(ctx, log, infraEnv)
+		if infraEnvUpdated {
+			return ctrl.Result{}, nil, true
 		}
-		return ctrl.Result{}, err
+		if err != nil {
+			patchErr := r.patchImageStatus(ctx, log, image, func(img *metal3_v1alpha1.PreprovisioningImage) {
+				setIronicAgentIgnitionFailureCondition(img, err)
+			})
+			if patchErr != nil {
+				return ctrl.Result{}, patchErr, true
+			}
+			return ctrl.Result{}, err, true
+		}
 	}
 
 	if infraEnv.Status.CreatedTime == nil {
 		log.Info("InfraEnv image has not been created yet")
 		// If the status updated successfully, no need to requeue, the change in the infraenv should trigger a reconcile
-		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, setNotCreatedCondition)
+		return ctrl.Result{}, r.patchImageStatus(ctx, log, image, setNotCreatedCondition), true
 	}
 
 	// The image has been created sooner than the specified cooldown period
@@ -178,12 +198,12 @@ func (r *PreprovisioningImageReconciler) Reconcile(origCtx context.Context, req 
 		log.Debug("InfraEnv image is too recent. Requeuing and retrying again soon")
 		err = r.patchImageStatus(ctx, log, image, setCoolDownCondition)
 		if err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, err, true
 		}
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Until(imageTimePlusCooldown)}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Until(imageTimePlusCooldown)}, nil, true
 	}
 
-	return ctrl.Result{}, r.handleImageUpdate(ctx, log, image, infraEnv)
+	return ctrl.Result{}, r.handleImageUpdate(ctx, log, image, infraEnv), true
 }
 
 func clearImageStatus(image *metal3_v1alpha1.PreprovisioningImage) {
@@ -750,6 +770,15 @@ func (r *PreprovisioningImageReconciler) handlePreprovisioningImageDeletion(ctx 
 	if !funk.ContainsString(image.GetFinalizers(), PreprovisioningImageFinalizerName) {
 		// Allow deletion of the PreprovisioningImage if the finalizer is not present
 		return ctrl.Result{}, nil
+	}
+
+	// Update image status to reflect current InfraEnv state even during deletion
+	// This ensures other controllers can use accurate image URLs for deprovisioning
+	// Don't add ironic agent during deletion
+	log.Debug("Updating image status from InfraEnv during deletion")
+	if _, err, _ := r.reconcileInfraEnvAndUpdateStatus(ctx, log, image, false); err != nil {
+		log.WithError(err).Debug("failed to update image status during deletion")
+		// Continue with deletion even if status update fails
 	}
 
 	// Get the BMH that owns this PreprovisioningImage
